@@ -1,1 +1,1 @@
-# jax_fem_cfd
+# jax-fem-cfd

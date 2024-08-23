@@ -1,3 +1,6 @@
+# Ignore the data folder
+examples/data/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -55,25 +58,25 @@ cover/
 *.mo
 *.pot
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+# # Django stuff:
+# *.log
+# local_settings.py
+# db.sqlite3
+# db.sqlite3-journal
 
-# Flask stuff:
-instance/
-.webassets-cache
+# # Flask stuff:
+# instance/
+# .webassets-cache
 
-# Scrapy stuff:
-.scrapy
+# # Scrapy stuff:
+# .scrapy
 
-# Sphinx documentation
-docs/_build/
+# # Sphinx documentation
+# docs/_build/
 
-# PyBuilder
-.pybuilder/
-target/
+# # PyBuilder
+# .pybuilder/
+# target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
@@ -107,19 +110,19 @@ ipython_config.py
 #   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
 #   in version control.
 #   https://pdm.fming.dev/latest/usage/project/#working-with-version-control
-.pdm.toml
-.pdm-python
-.pdm-build/
+# .pdm.toml
+# .pdm-python
+# .pdm-build/
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+# # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
+# __pypackages__/
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
+# # Celery stuff
+# celerybeat-schedule
+# celerybeat.pid
 
-# SageMath parsed files
-*.sage.py
+# # SageMath parsed files
+# *.sage.py
 
 # Environments
 .env
@@ -131,19 +134,19 @@ env.bak/
 venv.bak/
 
 # Spyder project settings
-.spyderproject
-.spyproject
+# .spyderproject
+# .spyproject
 
-# Rope project settings
-.ropeproject
+# # Rope project settings
+# .ropeproject
 
-# mkdocs documentation
-/site
+# # mkdocs documentation
+# /site
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# # mypy
+# .mypy_cache/
+# .dmypy.json
+# dmypy.json
 
 # Pyre type checker
 .pyre/
