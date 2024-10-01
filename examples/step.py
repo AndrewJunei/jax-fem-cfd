@@ -1,40 +1,15 @@
 import jax.numpy as jnp
-from jax_fem_cfd.setup.regular_mesh import create_mesh_2d
-from jax_fem_cfd.setup.common import set_face_velocity, format_boundaries, timestep_loop
-from jax_fem_cfd.solvers.standard_2d import setup_solver, four_step_timestep
+import jax_fem_cfd.setup.simulation as sim
 from jax_fem_cfd.utils.running import *
 
 
-def step_setup(num_elem, domain_size, Re, Cmax):
+def step_setup(U_d, gamma_d, surfnodes, nn):
     """ 2D flow over a backward facing step. The step takes up the bottom half of the total 
         domain height. In this setup, the left boundary marks the end of the step. For this to 
         work, the x velocity takes on a fully developed parabolic profile on the top half of the 
         left boundary and is 0 below. There are walls on the top and bottom boundaries, and an
         outlet on the right.
     """
-    rho = 1
-    u_avg = 1
-    mu = rho * u_avg * domain_size[1] / Re
-    print('Re =', Re)
-
-    h = domain_size[0] / num_elem[0]
-    Pe = u_avg * h / (2*mu / rho)
-    print('Avg global Pe = ', Pe)
-
-    dt = Cmax * h / u_avg
-    print('dt =', dt)
-
-    node_coords, nconn, surfnodes, bconns, nvecs = create_mesh_2d(*num_elem, *domain_size)
-    nn = node_coords.shape[0]
-    print(f'Using a {num_elem[0]}x{num_elem[1]} mesh')
-
-    bconn = jnp.concatenate([bconns[0], bconns[2], bconns[3]], axis=0) # exclude outlet
-    nvec = jnp.concatenate([nvecs[0], nvecs[2], nvecs[3]], axis=0) # exclude outlet
-    gamma_d = jnp.concatenate([surfnodes[0], surfnodes[2], surfnodes[3]]) # exclude outlet
-    gamma_p = surfnodes[1][1:-1] # outlet (check corners)
-
-    gamma_d, U_d, not_gamma_p = format_boundaries(gamma_d, gamma_p, nn, 2)
-
     def parabolic_inlet(node_coords, left_nodes):
         """ Set the parabolic x velocity profile for the inlet 
         """
@@ -48,30 +23,14 @@ def step_setup(num_elem, domain_size, Re, Cmax):
     
     left_nodes = surfnodes[3]
     left_velocity = parabolic_inlet(node_coords, left_nodes) # left face
-    U_d = set_face_velocity(U_d, left_nodes, gamma_d, left_velocity, nn, 1) # rest are 0
+    U_d = sim.set_face_velocity(U_d, left_nodes, gamma_d, left_velocity, nn, var=1) # rest are 0
 
-    U = jnp.zeros(2*nn) # initial condition
-    P = jnp.zeros(nn)
-    print('Boundary conditions have been set\n')
+    U0 = jnp.zeros(2*nn) # initial condition
+    P0 = jnp.zeros(nn)
 
-    wq, N, Nderiv, M, Le, Ge, F, L_diag = setup_solver(node_coords, nconn, bconn, nvec, 
-                                                       rho, 
-                                                       not_gamma_p, gamma_d, U_d)
-    
-    mask = F != 0
-    F_nonzero = F[mask]
-    F_idx = jnp.arange(F.shape[0])[mask]
-    F = F_nonzero
+    return U_d, U0, P0
 
-    def timestep_func(U_n, U_n_1, P_n):
-        return four_step_timestep(U_n, U_n_1, P_n, M, Le, Ge, rho, mu, h, dt, nconn, 
-                                  wq, N, Nderiv, 
-                                  gamma_d, U_d, not_gamma_p, F, F_idx, L_diag, nn)
-    
-    return U, P, timestep_func, dt, node_coords
-
-
-def step_plots(node_coords, num_elem, U, p, Re, gmres_list, cg_list, step_list):
+def step_plots(node_coords, num_elem, U, p, Re, U_iters, P_iters, steps):
     import jax_fem_cfd.utils.plotting as plot_util
     import matplotlib.pyplot as plt
 
@@ -110,8 +69,8 @@ def step_plots(node_coords, num_elem, U, p, Re, gmres_list, cg_list, step_list):
     u_at_target_x = interpolate_at_x(x1d, u2d, 7.0)
     v_at_target_x = interpolate_at_x(x1d, v2d, 7.0)
 
-    plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', 
-                           figsize=(12, 4), c_shrink=0.4, quiv=False)
+    # plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', 
+    #                        figsize=(12, 4), c_shrink=0.4, quiv=False)
     
     if Re == 800:
         x1d = np.linspace(x.min(), x.max(), nnx)
@@ -125,7 +84,7 @@ def step_plots(node_coords, num_elem, U, p, Re, gmres_list, cg_list, step_list):
                                 'x Velocity at x=7.0', 'y Velocity at x=7.0', 'y', 'y')
 
     plot_util.plot_streamlines(x2d, y2d, u2d, v2d, 'Streamlines', figsize=(12,4))
-    plot_util.plot_solve_iters(gmres_list, cg_list, step_list)
+    plot_util.plot_solve_iters(U_iters, P_iters, steps)
     plt.show()
 
 
@@ -133,16 +92,38 @@ if __name__ == "__main__":
 
     # use_single_gpu(DEVICE_ID=7)
     print_device_info()
+
+    config = sim.Config(mesh="simple",
+                        solver="standard",
+                        mesh_config=sim.SimpleMeshConfig(
+                            num_elem=[150, 15], # x elements, y elements
+                            domain_size=[10, 1], # x length, y length
+                            dirichlet_faces=[0, 2, 3], # DTL
+                            outlet_faces=[1]), # R
+                        solver_config=sim.StandardSolverConfig(
+                            ndim=2,
+                            shape_func_ord=1,
+                            streamline_diff=True,
+                            pressure_precond=None))
     
-    num_elem = [150, 15] # x elements, y elements
-    domain_size= [10, 1] # x length, y length
+    precompute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d = sim.setup(config)
+    print('Mesh and solver setup complete')
+    print(f'Using a {config.mesh_config.num_elem[0]}x{config.mesh_config.num_elem[1]} mesh')
+    
     t_final = 215 # final time of simulation
+    Cmax = 5 # for CFL condition
+    rho, u_avg = 1, 1
     Re = 800
-    Cmax = 10 # for CFL condition
+    mu = rho * u_avg * config.mesh_config.domain_size[1] / Re
+    dt = Cmax * h / u_avg
+    print('Re =', Re)
+    print('dt =', dt)
 
-    U0, p0, timestep_func, dt, node_coords = step_setup(num_elem, domain_size, Re, Cmax)
+    U_d, U0, P0 = step_setup(U_d, gamma_d, surfnodes, nn)
+    print('Boundary conditions have been set\n')
 
-    U, p, gmres_list, cg_list, step_list = timestep_loop(t_final, dt, 20, timestep_func, U0, p0)
+    U, p, U_iters, P_iters, steps = sim.timestep_loop(t_final, dt, 20, 20, precompute, timestep, 
+                                                      rho, mu, U_d, U0, P0) 
 
     # save_sol(U, p, 'data/800step.npy')
     # save_iter_hist(gmres_list, cg_list, step_list, 'data/800step_iters.npy')
@@ -150,7 +131,7 @@ if __name__ == "__main__":
     # U, p = load_sol('data/800step.npy')
     # gmres_list, cg_list, step_list = load_iter_hist('data/800step_iters.npy')
 
-    step_plots(node_coords, num_elem, U, p, Re, gmres_list, cg_list, step_list)
+    step_plots(node_coords, config.mesh_config.num_elem, U, p, Re, U_iters, P_iters, steps)
 
 
 

@@ -4,7 +4,6 @@ from matplotlib.tri import Triangulation
 from scipy.interpolate import griddata
 plt.rcParams['font.family'] = 'Arial'
 
-
 def get_2d_arrays(x, y, u, v, nnx, nny):
     x_unique = np.linspace(x.min(), x.max(), nnx)
     y_unique = np.linspace(y.min(), y.max(), nny)
@@ -86,10 +85,10 @@ def compare_double(xref1, ref1, reflbl1, x1, sol1, lbl1, xref2, ref2, reflbl2, x
 
     plt.tight_layout()
 
-def plot_solve_iters(gmres_iters, cg_iters, steps):
+def plot_solve_iters(momentum_iters, pressure_iters, steps):
     plt.figure()
-    plt.plot(steps, gmres_iters, label='GMRES', color='red', marker='o')
-    plt.plot(steps, cg_iters, label='CG', color='black', marker='s')
+    plt.plot(steps, momentum_iters, label='Momentum: BiCGSTAB', color='red', marker='o')
+    plt.plot(steps, pressure_iters, label='Pressure: CG', color='black', marker='s')
     plt.xlabel('Timestep', fontsize=12)
     plt.ylabel('Iterations', fontsize=12)
     plt.legend(fontsize=12)

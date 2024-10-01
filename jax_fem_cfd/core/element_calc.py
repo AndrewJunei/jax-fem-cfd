@@ -2,7 +2,12 @@ import jax
 import jax.numpy as jnp
 from functools import partial
 
-@partial(jax.jit, static_argnums=2)
+""" Currently we assume that a regular mesh is used and rho is constant over each node.
+    If this is no longer the case, the functions can be modified to accomodate this by using
+    the vmap approach in convection_element_calc.
+"""
+
+# @partial(jax.jit, static_argnums=2)
 def jit_segment_sum(data, indices, nn):
     return jax.ops.segment_sum(data, indices, nn)
 
@@ -30,9 +35,6 @@ def gradient_element_calc(wq, N, Nderiv, ndim):
     """
     Ge_list = [jnp.sum((N * wq)[:, :, jnp.newaxis] @ Nderiv[:, i, :][:, jnp.newaxis, :], axis=0)
                for i in range(ndim)] 
-    # G1e = jnp.sum((N * wq)[:, :, jnp.newaxis] @ Nderiv[:, 0, :][:, jnp.newaxis, :], axis=0)
-    # G2e = jnp.sum((N * wq)[:, :, jnp.newaxis] @ Nderiv[:, 1, :][:, jnp.newaxis, :], axis=0)
-    # return jnp.stack((G1e, G2e), axis=0)
 
     return jnp.stack(Ge_list, axis=0)
 
@@ -42,7 +44,6 @@ def convection_element_calc(nconn, rho, U, wq, N, Nderiv, nn, ndim):
     """
     def element_convection(ie):
         U_q = N @ jnp.stack([U[nconn[ie] + nn*i] for i in range(ndim)], axis=1) # (q,ndim)
-        # U_q = jnp.stack((N @ U[nconn[ie]], N @ U[nconn[ie] + nn]), axis=1) # (q, 2)
         Ce = jnp.sum((N * wq)[:, :, jnp.newaxis] @ (rho * U_q[:, jnp.newaxis, :] @ Nderiv), axis=0)
         return Ce
 
@@ -58,7 +59,6 @@ def streamline_diff_element_calc(nconn, h, mu, rho, U, wq, N, Nderiv, nn, ndim):
     """
     def element_S(ie):
         U_q = N @ jnp.stack([U[nconn[ie] + nn*i] for i in range(ndim)], axis=1) # (q, ndim)
-        # U_q = jnp.stack((N @ U[nconn[ie]], N @ U[nconn[ie] + nn]), axis=1) # (q, 2)
 
         U_q_norm = jnp.linalg.norm(U_q, axis=1) # (q,)
         Re = rho * U_q_norm * h / (2 * mu) # (q,)
@@ -77,7 +77,7 @@ def streamline_diff_element_calc(nconn, h, mu, rho, U, wq, N, Nderiv, nn, ndim):
 
     return Se_all
 
-def laplacian_diag(Le, nconn, not_gamma_p, nn):
+def laplacian_diag(Le, nconn, nn):
     """ Returns the 1D laplacian diagonal entries. Used in Jacobi and EBE preconditioning 
         of the pressure solve 
     """
@@ -86,9 +86,8 @@ def laplacian_diag(Le, nconn, not_gamma_p, nn):
 
     indices = nconn.flatten()
     L_diag = jit_segment_sum(Le_diag_all, indices, nn)
-    diag = L_diag[not_gamma_p] # condensed preconditioner
 
-    return diag
+    return L_diag
 
 def u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, wq, N, nn):
     """ Calculates the 1D integral: int_Gamma q (u dot n) dGamma

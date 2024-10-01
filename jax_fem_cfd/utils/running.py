@@ -4,7 +4,10 @@ import jax
 def use_single_gpu(DEVICE_ID):
     import os
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(DEVICE_ID)
+    if DEVICE_ID is None:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ''
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(DEVICE_ID)
 
 def print_device_info():
     print("Visible JAX devices:", jax.devices())
@@ -22,15 +25,15 @@ def load_sol(sol_path):
     print('Loaded solution from', sol_path)
     return U, p
 
-def save_iter_hist(gmres_list, cg_list, steps, path):
-    hist = np.stack((gmres_list, cg_list, steps), axis=0)
+def save_iter_hist(momentum_list, pressure_list, steps, path):
+    hist = np.stack((momentum_list, pressure_list, steps), axis=0)
     np.save(path, hist)
     print('Saved linear solver iteration counts to', path)
 
 def load_iter_hist(path):
     hist = np.load(path)
-    gmres_iters = hist[0, :]
-    cg_iters = hist[1, :]
+    momentum_iters = hist[0, :]
+    pressure_iters = hist[1, :]
     steps = hist[2, :]
     print('Loaded iteration counts from', path)
-    return gmres_iters, cg_iters, steps
+    return momentum_iters, pressure_iters, steps
