@@ -14,12 +14,15 @@ def cavity_setup(U_d, gamma_d, surfnodes, nn, u_top):
 
     return U_d, U0, P0
 
-def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters, steps):
+def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters, steps, ord):
     import jax_fem_cfd.utils.plotting as plot_util
     import matplotlib.pyplot as plt
 
     nn = node_coords.shape[0]
-    nnx, nny = num_elem[0] + 1, num_elem[1] + 1
+    if ord == 1:
+        nnx, nny = num_elem[0] + 1, num_elem[1] + 1
+    elif ord == 2:
+        nnx, nny = 2*num_elem[0] + 1, 2*num_elem[1] + 1
 
     x = node_coords[:, 0]
     y = node_coords[:, 1]
@@ -61,7 +64,7 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
     ghia_map = { 5000: (ughia5000, vghia5000), 1000: (ughia1000, vghia1000),
                 400: (ughia400, vghia400), 100: (ughia100, vghia100) }
 
-    # plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', quiv=True)
+    plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', quiv=True)
     # plot_util.plot_surface(x, y, p, 'Pressure', figsize=(8,5))
 
     if Re in [5000, 1000, 400, 100]:
@@ -72,8 +75,8 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
         y1d = jnp.linspace(0, domain_size[1], ux.shape[0])
         reflbl = f'Ghia Re={Re}'
         lbl = f'{num_elem[0]}x{num_elem[1]} Mesh'
-        plot_util.compare_double(yghia, ughia, reflbl, y1d, ux[:, num_elem[0] // 2], lbl, 
-                                xghia, vghia, reflbl, x1d, vy[num_elem[0] // 2, :], lbl,
+        plot_util.compare_double(yghia, ughia, reflbl, y1d, ux[:, (nnx - 1) // 2], lbl, 
+                                xghia, vghia, reflbl, x1d, vy[(nny - 1) // 2, :], lbl,
                                 'x Velocity at x=0.5', 'y Velocity at y=0.5', 'y', 'x')
         
     plot_util.plot_solve_iters(U_iters, P_iters, steps)
@@ -90,7 +93,8 @@ if __name__ == "__main__":
                         mesh_config=sim.SimpleMeshConfig(
                             num_elem=[64, 64], # x elements, y elements
                             domain_size=[1, 1], # x length, y length
-                            dirichlet_faces=[0, 1, 2, 3], # DRTL
+                            inlet_faces=[2], # DRTL, 2 = top
+                            wall_faces=[0, 1, 3], # bottom, right, left
                             outlet_faces=[]), # no outlet
                         solver_config=sim.StandardSolverConfig(
                             ndim=2,
@@ -104,7 +108,7 @@ if __name__ == "__main__":
 
     t_final = 30 # final time of simulation
     Cmax = 10 # for CFL condition
-    rho, mu, u_top = 1, 0.0025, 1
+    rho, mu, u_top = 1, 0.001, 1
     dt = Cmax * h / u_top
     Re = int(rho * u_top * config.mesh_config.domain_size[0] / mu)
     print('Re =', Re)
@@ -125,7 +129,7 @@ if __name__ == "__main__":
     # gmres_list, cg_list, step_list = load_iter_hist('data/400cavity_iters.npy')
 
     cavity_plots(node_coords, config.mesh_config.num_elem, config.mesh_config.domain_size,
-                 U, p, Re, U_iters, P_iters, steps)
+                 U, p, Re, U_iters, P_iters, steps, config.solver_config.shape_func_ord)
 
 
 

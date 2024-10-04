@@ -2,7 +2,7 @@
 """
 import jax
 import jax.numpy as jnp
-from..core import linear_shape_functions as shapefunc
+from..core import shape_functions as shapefunc
 from ..core import element_calc as ecalc
 from ..core import element_mult as emult
 from ..core.jax_iterative_solvers import bicgstab, cg
@@ -182,16 +182,22 @@ def four_step_timestep(U_n, U_n_1, P_n, M, Le, Ge, rho, mu, h, dt, nconn, wq, N,
 
 
 def setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, ndim, h,
-                 stab, p_precond):
+                 stab, p_precond, shape_func_ord):
 
-    if ndim == 2:
-        wq, N, Nderiv = shapefunc.quad_2d_shape_functions(node_coords[nconn[0]])
-        bwq, bN, _ = shapefunc.linear_1d_shape_functions(node_coords[bconn[0]])
+    if shape_func_ord == 1:
+        if ndim == 2:
+            wq, N, Nderiv = shapefunc.quad4_shape_functions(node_coords[nconn[0]])
+            bwq, bN, _ = shapefunc.lin2_shape_functions(node_coords[bconn[0]])
 
-    elif ndim == 3:
-        wq, N, Nderiv = shapefunc.hex_3d_shape_functions(node_coords[nconn[0]])
-        # (z, y) coords, check for more general case
-        bwq, bN, _ = shapefunc.quad_2d_shape_functions(node_coords[bconn[0]][:, [2, 1]]) 
+        elif ndim == 3:
+            wq, N, Nderiv = shapefunc.hex8_shape_functions(node_coords[nconn[0]])
+            # (z, y) coords, check for more general case
+            bwq, bN, _ = shapefunc.quad4_shape_functions(node_coords[bconn[0]][:, [2, 1]]) 
+    
+    elif shape_func_ord == 2:
+        if ndim == 2:
+            wq, N, Nderiv = shapefunc.quad9_shape_functions(node_coords[nconn[0]])
+            bwq, bN, _ = shapefunc.lin3_shape_functions(node_coords[bconn[0]])
 
     @jax.jit
     def precompute_loaded(rho, U_d):

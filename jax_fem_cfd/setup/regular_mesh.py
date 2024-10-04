@@ -103,3 +103,44 @@ def create_mesh_3d(ne_x, ne_y, ne_z, domain_size_x, domain_size_y, domain_size_z
     nvecs = [jnp.tile(normals[i], (bconns[i].shape[0], 1)) for i in range(6)]
     
     return node_coords, nconn, surfnodes, bconns, nvecs
+
+@partial(jax.jit, static_argnums=(0, 1, 2, 3))
+def create_mesh_2d_quad9(nex, ney, Lx, Ly):
+    """ 2D, rectangular domain, regular mesh for 9-node quadrilateral elements
+    """
+    nnx, nny = 2*nex + 1, 2*ney + 1
+    dx, dy = Lx / nex, Ly / ney
+
+    def compute_node_coords(i, j):
+        return jnp.array([i*dx/2, j*dy/2])
+
+    def compute_nconn(ie, je):
+        return jnp.array([(2*ie) + 2*je*nnx, (2*ie + 1) + 2*je*nnx, 
+                          (2*ie + 2) + 2*je*nnx, (2*ie + 2) + (2*je + 1)*nnx, 
+                          (2*ie + 2) + (2*je + 2)*nnx, (2*ie + 1) + (2*je + 2)*nnx,
+                          (2*ie) + (2*je + 2)*nnx, (2*ie) + (2*je + 1)*nnx,
+                          (2*ie + 1) + (2*je + 1)*nnx], dtype=int)
+    
+    node_coords = jax.vmap(jax.vmap(compute_node_coords, in_axes=(0, None)), 
+                           in_axes=(None, 0))(jnp.arange(nnx), jnp.arange(nny)).reshape(-1, 2)
+
+    elem_indices = jnp.arange(nex * ney)
+    ie_indices = elem_indices % nex  # element index in x-direction
+    je_indices = elem_indices // nex  # element index in y-direction
+
+    nconn = jax.vmap(compute_nconn)(ie_indices, je_indices)
+
+    surfnodesD = jnp.arange(0, nnx) 
+    surfnodesR = jnp.arange(nnx - 1, nnx * nny, nnx)
+    surfnodesT = jnp.arange(nnx * (nny - 1), nnx * nny) # can index backward
+    surfnodesL = jnp.arange(0, nnx * nny, nnx) # can index backward 
+
+    surfnodes = [surfnodesD, surfnodesR, surfnodesT, surfnodesL]
+    
+    bconns = [jnp.stack([nodes[:-2:2], nodes[1:-1:2], nodes[2::2]], axis=1) for nodes in surfnodes]
+    
+    normals = jnp.array([[0, -1], [1, 0], [0, 1], [-1, 0]])
+    nvecs = [jnp.tile(normals[i], (bconns[i].shape[0], 1)) for i in range(4)]
+
+    return node_coords, nconn, surfnodes, bconns, nvecs
+

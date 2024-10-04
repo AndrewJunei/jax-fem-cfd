@@ -82,7 +82,8 @@ if __name__ == "__main__":
                         mesh_config=sim.SimpleMeshConfig(
                             num_elem=[60, 20, 20], # x elements, y elements, z elements
                             domain_size=[3, 1, 1], # x length, y length, z length
-                            dirichlet_faces=[0, 2, 3], # DTL
+                            inlet_faces=[3], # L
+                            wall_faces=[0, 2], # DT
                             outlet_faces=[1]), # R
                         solver_config=sim.StandardSolverConfig(
                             ndim=3,

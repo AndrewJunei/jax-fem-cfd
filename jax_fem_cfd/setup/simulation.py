@@ -11,7 +11,8 @@ class SimpleMeshConfig:
     # these variables can be set to any type when the class is initialized
     num_elem: List[int]
     domain_size: List[float]
-    dirichlet_faces: List[int]
+    inlet_faces: List[int]
+    wall_faces: List[int]
     outlet_faces: List[int]
 
 @dataclass
@@ -51,24 +52,34 @@ class Config:
             
             if self.solver_config.ndim != len(self.mesh_config.num_elem):
                 raise ValueError("Solver and mesh dimensions must match")
+            
+            if self.solver_config.ndim == 3 and self.solver_config.shape_func_ord == 2:
+                raise ValueError("3D quadratic shape functions not yet implemented")
 
-def simple_mesh(mesh_config: SimpleMeshConfig):
+def simple_mesh(mesh_config: SimpleMeshConfig, shape_func_ord):
     
     ndim = len(mesh_config.num_elem)
 
-    if ndim == 2:
-        node_coords, nconn, surfnodes, bconns, nvecs = rm.create_mesh_2d(*mesh_config.num_elem, 
-                                                                         *mesh_config.domain_size)
-    elif ndim == 3:
-        node_coords, nconn, surfnodes, bconns, nvecs = rm.create_mesh_3d(*mesh_config.num_elem, 
-                                                                         *mesh_config.domain_size)
+    if shape_func_ord == 1:
+        if ndim == 2:
+            mesh_data = rm.create_mesh_2d(*mesh_config.num_elem, *mesh_config.domain_size)
+        
+        elif ndim == 3:
+            mesh_data = rm.create_mesh_3d(*mesh_config.num_elem, *mesh_config.domain_size)
 
+    elif shape_func_ord == 2:
+        if ndim == 2:
+            mesh_data = rm.create_mesh_2d_quad9(*mesh_config.num_elem, *mesh_config.domain_size)
+    
+    node_coords, nconn, surfnodes, bconns, nvecs = mesh_data
     nn = node_coords.shape[0]
     h = mesh_config.domain_size[0] / mesh_config.num_elem[0]
 
-    bconn = jnp.concatenate([bconns[i] for i in mesh_config.dirichlet_faces], axis=0)
-    nvec = jnp.concatenate([nvecs[i] for i in mesh_config.dirichlet_faces], axis=0)
-    gamma_d = jnp.concatenate([surfnodes[i] for i in mesh_config.dirichlet_faces]) # check corners
+    bconn = jnp.concatenate([bconns[i] for i in mesh_config.inlet_faces], axis=0)
+    nvec = jnp.concatenate([nvecs[i] for i in mesh_config.inlet_faces], axis=0)
+
+    dirichlet_faces = mesh_config.inlet_faces + mesh_config.wall_faces
+    gamma_d = jnp.concatenate([surfnodes[i] for i in dirichlet_faces]) # check corners
 
     if not mesh_config.outlet_faces: # True if outlet_faces is empty
         gamma_p = 0 # set pressure = 0 at node 0
@@ -84,7 +95,7 @@ def simple_mesh(mesh_config: SimpleMeshConfig):
 def setup(config: Config):
 
     if config.mesh == "simple":
-        mesh_data = simple_mesh(config.mesh_config)
+        mesh_data = simple_mesh(config.mesh_config, config.solver_config.shape_func_ord)
         node_coords, nconn, surfnodes, nn, h, bconn, nvec, gamma_d, U_d, gamma_p = mesh_data
 
     if config.solver == "standard":
@@ -93,7 +104,8 @@ def setup(config: Config):
         precompute, timestep = setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, 
                                             config.solver_config.ndim, h, 
                                             config.solver_config.streamline_diff,
-                                            config.solver_config.pressure_precond)
+                                            config.solver_config.pressure_precond,
+                                            config.solver_config.shape_func_ord)
         
         return precompute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d
 
@@ -120,7 +132,7 @@ def timestep_loop(t_final, dt, print_iter, save_iter, precompute_func, timestep_
     print(f'Run to compile took {(compile_time):.2f} s\n')
 
     total_start = time.perf_counter()
-    while t < t_final: # no condition to exit loop if solution diverges
+    while t < t_final: 
         if step > 0:
             U_n_1 = U_n
         else:
@@ -136,12 +148,12 @@ def timestep_loop(t_final, dt, print_iter, save_iter, precompute_func, timestep_
         t += dt
         step += 1
 
-        if step == 1 or step % save_iter == 0:
+        if step == 1 or step % save_iter == 0 or t >= t_final:
             U_iter_list.append(U_iters)
             P_iter_list.append(P_iters)
             step_list.append(step)
 
-        if step == 1 or step % print_iter == 0 or t > t_final:
+        if step == 1 or step % print_iter == 0 or t >= t_final:
             diff = (jnp.linalg.norm(jnp.concatenate((U, P)) - jnp.concatenate((U_n, P_n)), 2) / 
                         jnp.linalg.norm(jnp.concatenate((U, P)), 2))
 

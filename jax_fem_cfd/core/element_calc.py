@@ -98,10 +98,11 @@ def u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, wq, N, nn):
     u_indices = jnp.searchsorted(gamma_d, bconn)
     v_indices = jnp.searchsorted(gamma_d, bconn + nn)
     U = jnp.stack([U_d[u_indices], U_d[v_indices]], axis=-1)
+    q = wq.shape[0]
 
     def element_integral(ie):
-        U_q = N @ U[ie]  # (q,I) x (I,2) -> (q,2)
-        n_elem = jnp.stack((nvec[ie], nvec[ie]), axis=0)  # (q,2)
+        U_q = N @ U[ie]  # (q, I) x (I, 2) -> (q, 2)
+        n_elem = jnp.tile(nvec[ie], (q, 1)) # (q, 2)
         Fe = (N * wq).T @ jnp.sum(n_elem * U_q, axis=1)  # (I,)
         return Fe
 
@@ -123,10 +124,11 @@ def u_dot_n_boundary_integral_2d(bconn, nvec, gamma_d, U_d, wq, N, nn):
     v_indices = jnp.searchsorted(gamma_d, bconn + nn)
     w_indices = jnp.searchsorted(gamma_d, bconn + 2*nn)
     U_at_bconn = jnp.stack([U_d[u_indices], U_d[v_indices], U_d[w_indices]], axis=-1)
+    q = wq.shape[0]
 
     def element_integral(ie):
         U_q = N @ U_at_bconn[ie]  # (q, I) x (I, 3) -> (q, 3)
-        n_elem = jnp.stack([nvec[ie], nvec[ie], nvec[ie], nvec[ie]], axis=0)  # (q, 3)
+        n_elem = jnp.tile(nvec[ie], (q, 1)) # (q, 3)
         Fe = (N * wq).T @ jnp.sum(n_elem * U_q, axis=1)  # (I,)
         return Fe
 
