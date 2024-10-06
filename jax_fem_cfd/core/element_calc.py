@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from functools import partial
 
 """ Currently we assume that a regular mesh is used and rho is constant over each node.
     If this is no longer the case, the functions can be modified to accomodate this by using
@@ -11,17 +10,21 @@ from functools import partial
 def jit_segment_sum(data, indices, nn):
     return jax.ops.segment_sum(data, indices, nn)
 
-def lumped_mass_matrix(nconn, rho, wq, N, nn):
-    """ Returns a 1D vector of shape (nn,) containing the diagonal mass matrix entries
+def lumped_mass_matrix(nconn, wq, N, nn, ndim):
+    """ Returns a 1D vector of shape (nn,) containing the diagonal mass matrix entries,
+        excluding the factor of rho assumed to be a constant
     """
-    Me = jnp.sum((N * wq)[:, :, jnp.newaxis] @ (rho * N[:, jnp.newaxis, :]), axis=0)
+    Me = jnp.sum((N * wq)[:, :, jnp.newaxis] @ (N[:, jnp.newaxis, :]), axis=0)
 
     Me_lumped = jnp.sum(Me, axis=1)
     Me_lumped_all = jnp.tile(Me_lumped, nconn.shape[0])
     indices = nconn.flatten()
     M = jit_segment_sum(Me_lumped_all, indices, nn)
-    
-    return M
+
+    if ndim == 2:
+        return jnp.concatenate((M, M))
+    elif ndim == 3:
+        return jnp.concatenate((M, M, M))
 
 def laplacian_element_calc(wq, Nderiv):
     """ Returns a single laplacian element matrix of shape (nen, nen) 
@@ -89,7 +92,7 @@ def laplacian_diag(Le, nconn, nn):
 
     return L_diag
 
-def u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, wq, N, nn):
+def u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, nn, node_coords, shapefunc):
     """ Calculates the 1D integral: int_Gamma q (u dot n) dGamma
         bconn: nodes in each boundary element, shape (ne, I)
         nvec: normal vector at each boundary element (assumed constant within each element)
@@ -98,11 +101,12 @@ def u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, wq, N, nn):
     u_indices = jnp.searchsorted(gamma_d, bconn)
     v_indices = jnp.searchsorted(gamma_d, bconn + nn)
     U = jnp.stack([U_d[u_indices], U_d[v_indices]], axis=-1)
-    q = wq.shape[0]
 
     def element_integral(ie):
+        wq, N, _ = shapefunc(node_coords[bconn[ie]])
+
         U_q = N @ U[ie]  # (q, I) x (I, 2) -> (q, 2)
-        n_elem = jnp.tile(nvec[ie], (q, 1)) # (q, 2)
+        n_elem = jnp.tile(nvec[ie], (wq.shape[0], 1)) # (q, 2)
         Fe = (N * wq).T @ jnp.sum(n_elem * U_q, axis=1)  # (I,)
         return Fe
 
@@ -114,7 +118,7 @@ def u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, wq, N, nn):
     
     return F
 
-def u_dot_n_boundary_integral_2d(bconn, nvec, gamma_d, U_d, wq, N, nn):
+def u_dot_n_boundary_integral_2d(bconn, nvec, gamma_d, U_d, nn, node_coords, shapefunc):
     """ Calculates the 2D integral: int_Gamma q (u dot n) dGamma
         bconn: nodes in each boundary element, shape (ne, I)
         nvec: normal vector at each boundary element (assumed constant within each element)
@@ -123,12 +127,14 @@ def u_dot_n_boundary_integral_2d(bconn, nvec, gamma_d, U_d, wq, N, nn):
     u_indices = jnp.searchsorted(gamma_d, bconn)
     v_indices = jnp.searchsorted(gamma_d, bconn + nn)
     w_indices = jnp.searchsorted(gamma_d, bconn + 2*nn)
-    U_at_bconn = jnp.stack([U_d[u_indices], U_d[v_indices], U_d[w_indices]], axis=-1)
-    q = wq.shape[0]
+    U = jnp.stack([U_d[u_indices], U_d[v_indices], U_d[w_indices]], axis=-1)
 
     def element_integral(ie):
-        U_q = N @ U_at_bconn[ie]  # (q, I) x (I, 3) -> (q, 3)
-        n_elem = jnp.tile(nvec[ie], (q, 1)) # (q, 3)
+        # TODO: generalize these coordinates to different faces
+        wq, N, _ = shapefunc(node_coords[bconn[ie]][:, [2, 1]])
+
+        U_q = N @ U[ie]  # (q, I) x (I, 3) -> (q, 3)
+        n_elem = jnp.tile(nvec[ie], (wq.shape[0], 1)) # (q, 3)
         Fe = (N * wq).T @ jnp.sum(n_elem * U_q, axis=1)  # (I,)
         return Fe
 

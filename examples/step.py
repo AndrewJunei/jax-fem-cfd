@@ -98,9 +98,9 @@ if __name__ == "__main__":
                         mesh_config=sim.SimpleMeshConfig(
                             num_elem=[150, 15], # x elements, y elements
                             domain_size=[10, 1], # x length, y length
-                            inlet_faces=[3], # L
-                            wall_faces=[0, 2], # DT 
-                            outlet_faces=[1]), # R
+                            inlet_faces=[0, 2, 3], # down, top, left
+                            wall_faces=[], 
+                            outlet_faces=[1]), # right
                         solver_config=sim.StandardSolverConfig(
                             ndim=2,
                             shape_func_ord=1,

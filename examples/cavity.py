@@ -65,6 +65,7 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
                 400: (ughia400, vghia400), 100: (ughia100, vghia100) }
 
     plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', quiv=True)
+    # plot_util.plot_surface(x, y, u, 'x Velocity', figsize=(8,5))
     # plot_util.plot_surface(x, y, p, 'Pressure', figsize=(8,5))
 
     if Re in [5000, 1000, 400, 100]:
@@ -84,31 +85,32 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
 
 
 if __name__ == "__main__":
-        
     # use_single_gpu(DEVICE_ID=7)
     print_device_info()
+    # jax.config.update("jax_enable_x64", True)
 
     config = sim.Config(mesh="simple",
                         solver="standard",
                         mesh_config=sim.SimpleMeshConfig(
                             num_elem=[64, 64], # x elements, y elements
                             domain_size=[1, 1], # x length, y length
-                            inlet_faces=[2], # DRTL, 2 = top
-                            wall_faces=[0, 1, 3], # bottom, right, left
+                            inlet_faces=[0, 1, 2, 3], # DRTL, 2 = top
+                            wall_faces=[], # bottom, right, left
                             outlet_faces=[]), # no outlet
                         solver_config=sim.StandardSolverConfig(
                             ndim=2,
                             shape_func_ord=1,
                             streamline_diff=False,
-                            pressure_precond=None))
+                            pressure_precond="multigrid",
+                            final_multigrid_mesh=[4, 4]))
 
-    precompute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d = sim.setup(config)
+    compute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d = sim.setup(config)
     print('Mesh and solver setup complete')
     print(f'Using a {config.mesh_config.num_elem[0]}x{config.mesh_config.num_elem[1]} mesh')
 
-    t_final = 30 # final time of simulation
-    Cmax = 10 # for CFL condition
-    rho, mu, u_top = 1, 0.001, 1
+    rho, mu, u_top = 1, 0.0025, 1
+    t_final = 22 # final time of simulation
+    Cmax = 5 # for CFL condition
     dt = Cmax * h / u_top
     Re = int(rho * u_top * config.mesh_config.domain_size[0] / mu)
     print('Re =', Re)
@@ -119,7 +121,7 @@ if __name__ == "__main__":
     U_d, U0, P0 = cavity_setup(U_d, gamma_d, surfnodes, nn, u_top)
     print('Boundary conditions have been set\n')
 
-    U, p, U_iters, P_iters, steps = sim.timestep_loop(t_final, dt, 20, 20, precompute, timestep, 
+    U, p, U_iters, P_iters, steps = sim.timestep_loop(t_final, dt, 50, 50, compute, timestep, 
                                                       rho, mu, U_d, U0, P0) 
 
     # save_sol(U, p, 'data/400cavity.npy')

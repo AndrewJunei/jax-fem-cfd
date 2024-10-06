@@ -1,8 +1,7 @@
 import jax.numpy as jnp
 import time
 from dataclasses import dataclass
-from typing import Union, Literal, Optional, List
-from ..setup import regular_mesh as rm
+from typing import Literal, Optional, List
 
 
 @dataclass
@@ -21,6 +20,7 @@ class StandardSolverConfig:
     shape_func_ord: int
     streamline_diff: bool
     pressure_precond: Optional[str]
+    final_multigrid_mesh: Optional[List[int]]
 
 @dataclass
 class Config:
@@ -55,9 +55,26 @@ class Config:
             
             if self.solver_config.ndim == 3 and self.solver_config.shape_func_ord == 2:
                 raise ValueError("3D quadratic shape functions not yet implemented")
+            
+            if self.solver_config.pressure_precond == "multigrid":
+                num_elemf = self.solver_config.final_multigrid_mesh
+                num_elem = self.mesh_config.num_elem
+
+                if num_elemf is None:
+                    raise ValueError("Must specify final_multigrid_mesh to use multigrid")
+                
+                for n, f in zip(num_elem, num_elemf):
+                    if f > n:
+                        raise ValueError(f"final_multigrid_mesh is too large")
+                    ratio = n // f
+                    log2_ratio = jnp.log2(ratio)
+                    if not jnp.isclose(log2_ratio, jnp.round(log2_ratio)):
+                        raise ValueError(f"Invalid final_multigrid_mesh: log2({n}/{f}) is not an integer")
+
 
 def simple_mesh(mesh_config: SimpleMeshConfig, shape_func_ord):
-    
+    from ..setup import regular_mesh as rm
+
     ndim = len(mesh_config.num_elem)
 
     if shape_func_ord == 1:
@@ -89,6 +106,7 @@ def simple_mesh(mesh_config: SimpleMeshConfig, shape_func_ord):
     gamma_d = jnp.sort(jnp.unique(gamma_d))  # unique is not jitable
     gamma_d = jnp.concatenate([gamma_d + nn*i for i in range(ndim)]) 
     U_d = jnp.zeros_like(gamma_d, dtype=float) # initialization
+    gamma_p = jnp.unique(gamma_p)
 
     return node_coords, nconn, surfnodes, nn, h, bconn, nvec, gamma_d, U_d, gamma_p
 
@@ -101,13 +119,17 @@ def setup(config: Config):
     if config.solver == "standard":
         from ..solvers.standard import setup_solver
 
-        precompute, timestep = setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, 
-                                            config.solver_config.ndim, h, 
-                                            config.solver_config.streamline_diff,
-                                            config.solver_config.pressure_precond,
-                                            config.solver_config.shape_func_ord)
+        compute, timestep = setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, 
+                                         config.solver_config.ndim, h, 
+                                         config.solver_config.streamline_diff,
+                                         config.solver_config.pressure_precond,
+                                         config.solver_config.shape_func_ord,
+                                         config.mesh_config.num_elem,
+                                         config.solver_config.final_multigrid_mesh,
+                                         config.mesh_config.domain_size,
+                                         config.mesh_config.outlet_faces)
         
-        return precompute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d
+        return compute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d
 
 def set_face_velocity(U_d, nodes, gamma_d, values, nn, var):
     """ Set velocity values for specified node list
@@ -118,16 +140,16 @@ def set_face_velocity(U_d, nodes, gamma_d, values, nn, var):
 
     return U_d.at[node_indices].set(values)
 
-def timestep_loop(t_final, dt, print_iter, save_iter, precompute_func, timestep_func, 
+def timestep_loop(t_final, dt, print_iter, save_iter, compute_func, timestep_func, 
                   rho, mu, U_d, U, P):
     
     step, t = 0, 0.0
     U_iter_list, P_iter_list, step_list = [], [], []
 
-    M, Le, Ge, F, L_diag = precompute_func(rho, U_d)
+    F = compute_func(U_d)
 
     compile_start = time.perf_counter()
-    _, _, _, _ = timestep_func(U, U, P, M, Le, Ge, F, L_diag, dt, rho, mu, U_d)
+    _, _, _, _ = timestep_func(U, U, P, dt, rho, mu, U_d, F)
     compile_time = time.perf_counter() - compile_start
     print(f'Run to compile took {(compile_time):.2f} s\n')
 
@@ -141,8 +163,7 @@ def timestep_loop(t_final, dt, print_iter, save_iter, precompute_func, timestep_
         U_n, P_n = U, P
 
         start = time.perf_counter()
-        U, P, U_iters, P_iters = timestep_func(U_n, U_n_1, P_n, M, Le, Ge, F, L_diag, dt, 
-                                                    rho, mu, U_d)
+        U, P, U_iters, P_iters = timestep_func(U_n, U_n_1, P_n, dt, rho, mu, U_d, F)
         end = time.perf_counter()
 
         t += dt
