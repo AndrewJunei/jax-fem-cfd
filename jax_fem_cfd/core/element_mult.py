@@ -50,13 +50,13 @@ def gradient_element_mult(P, Ge, nconn, nn, ndim):
 
     return GP
 
-def visc_conv_mult(U, Ce_all, Le, mu, nconn, nn, ndim):
+def visc_conv_mult(U, Ce_all, Le, mu, rho, nconn, nn, ndim):
     """ Computes the combined (C + K) @ U 
     """
     Ke = mu * Le # viscous matrix is viscosity * laplacian
 
     def combined_mult(Ce, Ke, u):
-        return (Ce + Ke) @ u
+        return (rho*Ce + Ke) @ u
     
     v_combined_mult = jax.vmap(combined_mult, in_axes=(0, None, 0))
     indices = nconn.flatten()
@@ -77,13 +77,13 @@ def visc_conv_mult(U, Ce_all, Le, mu, nconn, nn, ndim):
 
     return result
 
-def stabilized_visc_conv_mult(U, Ce_all, Se_all, Le, mu, nconn, nn, ndim):
+def stabilized_visc_conv_mult(U, Ce_all, Se_all, Le, mu, rho, nconn, nn, ndim):
     """ Computes the combined (C + K + S) @ U 
     """
     Ke = mu * Le # viscous matrix is viscosity * laplacian
 
     def combined_mult(Ce, Ke, Se, u):
-        return (Ce + Ke + Se) @ u
+        return (rho*Ce + Ke + Se) @ u
     
     v_combined_mult = jax.vmap(combined_mult, in_axes=(0, None, 0, 0))
     indices = nconn.flatten()
@@ -129,3 +129,18 @@ def divergence_element_mult(U, Ge, nconn, nn, ndim):
         DU = D1u + D2v
 
     return DU
+
+def scalar_visc_conv_mult(phi, Ce_all, Le, D, nconn, nn):
+    """ Computes (C + K) @ phi
+    """
+    Ke = D * Le # D is the diffusion constant
+
+    def combined_mult(Ce, Ke, phie):
+        return (Ce + Ke) @ phie
+    
+    v_combined_mult = jax.vmap(combined_mult, in_axes=(0, None, 0))
+    data = v_combined_mult(Ce_all, Ke, phi[nconn])
+    
+    result = jit_segment_sum(data.flatten(), nconn.flatten(), nn)
+
+    return result

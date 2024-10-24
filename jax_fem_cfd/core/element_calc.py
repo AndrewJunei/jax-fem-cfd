@@ -41,13 +41,13 @@ def gradient_element_calc(wq, N, Nderiv, ndim):
 
     return jnp.stack(Ge_list, axis=0)
 
-def convection_element_calc(nconn, rho, U, wq, N, Nderiv, nn, ndim):
+def convection_element_calc(nconn, U, wq, N, Nderiv, nn, ndim):
     """ Calculates the convection element matrices
         U = [[u], [v]] or [[u], [v], [w]]. Ce_all has shape (ne, nen, nen)
     """
     def element_convection(ie):
         U_q = N @ jnp.stack([U[nconn[ie] + nn*i] for i in range(ndim)], axis=1) # (q,ndim)
-        Ce = jnp.sum((N * wq)[:, :, jnp.newaxis] @ (rho * U_q[:, jnp.newaxis, :] @ Nderiv), axis=0)
+        Ce = jnp.sum((N * wq)[:, :, jnp.newaxis] @ (U_q[:, jnp.newaxis, :] @ Nderiv), axis=0)
         return Ce
 
     v_element_convection = jax.vmap(element_convection)

@@ -106,7 +106,7 @@ def create_mesh_3d(ne_x, ne_y, ne_z, domain_size_x, domain_size_y, domain_size_z
 
 @partial(jax.jit, static_argnums=(0, 1, 2, 3))
 def create_mesh_2d_quad9(nex, ney, Lx, Ly):
-    """ 2D, rectangular domain, regular mesh for 9-node quadrilateral elements
+    """ 2D regular mesh for 9-node quadrilateral elements
     """
     nnx, nny = 2*nex + 1, 2*ney + 1
     dx, dy = Lx / nex, Ly / ney
@@ -141,6 +141,79 @@ def create_mesh_2d_quad9(nex, ney, Lx, Ly):
     
     normals = jnp.array([[0, -1], [1, 0], [0, 1], [-1, 0]])
     nvecs = [jnp.tile(normals[i], (bconns[i].shape[0], 1)) for i in range(4)]
+
+    return node_coords, nconn, surfnodes, bconns, nvecs
+
+# TODO: Add create_mesh_3d_hex27 here later
+
+@partial(jax.jit, static_argnums=(0, 1, 2, 3))
+def create_periodic_mesh_2d(nex, ney, Lx, Ly):
+    """ 2D quad4 regular mesh with periodic boundary conditions
+    """
+    nnx, nny = nex, ney # excluding periodic nodes
+    dx = Lx / nex
+    dy = Ly / ney
+
+    def compute_node_coords(i, j):
+        return jnp.array([i * dx, j * dy])
+
+    node_coords = jax.vmap(jax.vmap(compute_node_coords, in_axes=(0, None)), in_axes=(None, 0))(
+        jnp.arange(nnx), jnp.arange(nny)).reshape(-1, 2)
+
+    def compute_nconn(ie, je):
+        n0 = ie + je * nnx
+        n1 = (ie + 1) % nnx + je * nnx # wrap around
+        n2 = (ie + 1) % nnx + ((je + 1) % nny) * nnx # wrap around
+        n3 = ie + ((je + 1) % nny) * nnx # wrap around
+        return jnp.array([n0, n1, n2, n3], dtype=int)
+
+    elem_indices = jnp.arange(nex * ney)
+    ie_indices = elem_indices % nex
+    je_indices = elem_indices // nex
+
+    nconn = jax.vmap(compute_nconn)(ie_indices, je_indices)
+
+    surfnodes = None
+    bconns = None
+    nvecs = None
+
+    return node_coords, nconn, surfnodes, bconns, nvecs
+
+@partial(jax.jit, static_argnums=(0, 1, 2, 3))
+def create_periodic_mesh_2d_quad9(nex, ney, Lx, Ly):
+    """ 2D quad9 regular mesh with periodic boundary conditions
+    """
+    nnx, nny = 2 * nex, 2 * ney # excluding periodic nodes
+    dx, dy = Lx / nex, Ly / ney
+
+    def compute_node_coords(i, j):
+        return jnp.array([i * dx / 2, j * dy / 2])
+
+    node_coords = jax.vmap(jax.vmap(compute_node_coords, in_axes=(0, None)), 
+                           in_axes=(None, 0))(jnp.arange(nnx), jnp.arange(nny)).reshape(-1, 2)
+
+    def compute_nconn(ie, je):
+        n0 = (2 * ie)     + (2 * je)     * nnx
+        n1 = (2 * ie + 1) + (2 * je)     * nnx
+        n2 = (2 * ie + 2) % nnx + (2 * je)     * nnx  # wrap around in x
+        n3 = (2 * ie + 2) % nnx + (2 * je + 1) * nnx
+        n4 = (2 * ie + 2) % nnx + (2 * je + 2) % nny * nnx  # wrap around in x and y
+        n5 = (2 * ie + 1) + (2 * je + 2) % nny * nnx
+        n6 = (2 * ie)     + (2 * je + 2) % nny * nnx
+        n7 = (2 * ie)     + (2 * je + 1) * nnx
+        n8 = (2 * ie + 1) + (2 * je + 1) * nnx
+
+        return jnp.array([n0, n1, n2, n3, n4, n5, n6, n7, n8], dtype=int)
+
+    elem_indices = jnp.arange(nex * ney)
+    ie_indices = elem_indices % nex  # element index in x-direction
+    je_indices = elem_indices // nex  # element index in y-direction
+
+    nconn = jax.vmap(compute_nconn)(ie_indices, je_indices)
+
+    surfnodes = None
+    bconns = None
+    nvecs = None
 
     return node_coords, nconn, surfnodes, bconns, nvecs
 

@@ -3,17 +3,6 @@ import jax_fem_cfd.setup.simulation as sim
 from jax_fem_cfd.utils.running import *
 
 
-def cavity_setup(U_d, gamma_d, surfnodes, nn, u_top):
-    """ 2D lid driven cavity with leaky lid condition
-    """
-    top_nodes = surfnodes[2] # set lid x velocity
-    U_d = sim.set_face_velocity(U_d, top_nodes, gamma_d, u_top, nn, var=1) # rest are 0
-
-    U0 = jnp.zeros(2*nn) # initial condition
-    P0 = jnp.zeros(nn)
-
-    return U_d, U0, P0
-
 def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters, steps, ord):
     import jax_fem_cfd.utils.plotting as plot_util
     import matplotlib.pyplot as plt
@@ -28,8 +17,6 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
     y = node_coords[:, 1]
     u = U[:nn]
     v = U[nn:]
-
-    tri = plot_util.get_2d_tri(x, y)
 
     yghia = [0.0000, 0.0547, 0.0625, 0.0703, 0.1016, 0.1719, 0.2813, 0.4531, 0.5000, 0.6172,
          0.7344, 0.8516, 0.9531, 0.9609, 0.9688, 0.9766, 1.0000]
@@ -64,9 +51,13 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
     ghia_map = { 5000: (ughia5000, vghia5000), 1000: (ughia1000, vghia1000),
                 400: (ughia400, vghia400), 100: (ughia100, vghia100) }
 
-    plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', quiv=True)
+    # tri = plot_util.get_2d_tri(x, y)
+    # plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', quiv=True)
     # plot_util.plot_surface(x, y, u, 'x Velocity', figsize=(8,5))
     # plot_util.plot_surface(x, y, p, 'Pressure', figsize=(8,5))
+
+    x2d, y2d, u2d, v2d = plot_util.get_2d_arrays(x, y, u, v, nnx, nny)
+    plot_util.plot_streamlines(x2d, y2d, u2d, v2d, 'Streamlines')
 
     if Re in [5000, 1000, 400, 100]:
         ughia, vghia = ghia_map.get(Re, (None, None))
@@ -81,7 +72,8 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
                                 'x Velocity at x=0.5', 'y Velocity at y=0.5', 'y', 'x')
         
     plot_util.plot_solve_iters(U_iters, P_iters, steps)
-    plt.show()
+
+    plot_util.show_plots()
 
 
 if __name__ == "__main__":
@@ -92,25 +84,29 @@ if __name__ == "__main__":
     config = sim.Config(mesh="simple",
                         solver="standard",
                         mesh_config=sim.SimpleMeshConfig(
-                            num_elem=[64, 64], # x elements, y elements
+                            num_elem=[128, 128], # x elements, y elements
                             domain_size=[1, 1], # x length, y length
-                            inlet_faces=[0, 1, 2, 3], # DRTL, 2 = top
-                            wall_faces=[], # bottom, right, left
-                            outlet_faces=[]), # no outlet
+                            dirichlet_faces=[0, 1, 2, 3], # DRTL, 2 = top
+                            outlet_faces=[], # no outlet
+                            symmetry_faces=[],
+                            periodic=False), 
                         solver_config=sim.StandardSolverConfig(
                             ndim=2,
                             shape_func_ord=1,
                             streamline_diff=False,
-                            pressure_precond="multigrid",
+                            crank_nicolson=True, # why is it faster if True?
+                            solver_tol=1e-6,
+                            set_zeroP=True,
+                            pressure_precond='multigrid',
                             final_multigrid_mesh=[4, 4]))
 
     compute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d = sim.setup(config)
     print('Mesh and solver setup complete')
     print(f'Using a {config.mesh_config.num_elem[0]}x{config.mesh_config.num_elem[1]} mesh')
 
-    rho, mu, u_top = 1, 0.0025, 1
-    t_final = 22 # final time of simulation
-    Cmax = 5 # for CFL condition
+    rho, mu, u_top = 1, 0.001, 1
+    t_final = 35 # final time of simulation
+    Cmax = 10 # for CFL condition
     dt = Cmax * h / u_top
     Re = int(rho * u_top * config.mesh_config.domain_size[0] / mu)
     print('Re =', Re)
@@ -118,13 +114,18 @@ if __name__ == "__main__":
 
     # look into better way of abstracting the boundary condition setup and dt calculation
 
-    U_d, U0, P0 = cavity_setup(U_d, gamma_d, surfnodes, nn, u_top)
+    # no leaky lid condition!
+    top_nodes = surfnodes[2][1:-1] # set lid x velocity
+    U_d = sim.set_face_velocity(U_d, top_nodes, gamma_d, u_top, nn, var=1) # rest are 0
+
+    U0 = jnp.zeros(2*nn) # initial condition
+    P0 = jnp.zeros(nn)
     print('Boundary conditions have been set\n')
 
-    U, p, U_iters, P_iters, steps = sim.timestep_loop(t_final, dt, 50, 50, compute, timestep, 
+    U, p, U_iters, P_iters, steps = sim.timestep_loop(t_final, dt, 100, 100, compute, timestep, 
                                                       rho, mu, U_d, U0, P0) 
 
-    # save_sol(U, p, 'data/400cavity.npy')
+    # save_sol(U, p, 'testing/data/noleak_tol8_64bitincludeF_32mesh_Re1000cavity.npy')
     # save_iter_hist(gmres_list, cg_list, step_list, 'data/400cavity_iters.npy')
 
     # U, p = load_sol('data/400cavity.npy')

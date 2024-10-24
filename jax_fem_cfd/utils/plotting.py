@@ -1,8 +1,23 @@
+import matplotlib
+matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
+from PyQt5.QtCore import Qt
 import numpy as np
 from matplotlib.tri import Triangulation
 from scipy.interpolate import griddata
 plt.rcParams['font.family'] = 'Arial'
+
+def show_plots():
+    for i in plt.get_fignums(): # iterate over all active plot numbers
+        fig = plt.figure(i)
+        # get the window manager for the figure
+        manager = fig.canvas.manager
+        window = manager.window
+        # get window flags to stay on top and active
+        window.setWindowFlags(window.windowFlags() | Qt.WindowStaysOnTopHint)
+        window.show()  
+        window.activateWindow() # activate the window to bring it to front
+    plt.show()
 
 def get_2d_arrays(x, y, u, v, nnx, nny):
     x_unique = np.linspace(x.min(), x.max(), nnx)
@@ -39,6 +54,33 @@ def plot_contour(tri, f, x, y, u, v, nnx, nny, title, figsize=None, c_shrink=1.0
     plt.title(title, fontsize=12)
     plt.xlabel(xlbl, fontsize=12)
     plt.ylabel(ylbl, fontsize=12)
+
+def plot_image(f, x, y, u, v, nnx, nny, title, figsize=None, c_shrink=1.0, quiv=False,
+                 xlbl=None, ylbl=None):
+    plt.figure(figsize=figsize)
+
+    f = np.flip(f.reshape(nny, nnx), axis=0)
+
+    plt.imshow(f, cmap='jet', extent=(x.min(), x.max(), y.min(), y.max()))
+    plt.colorbar(shrink=c_shrink)
+
+    if quiv:
+        num = min(nnx, nny, 50)
+
+        xi = np.linspace(x.min(), x.max(), num)
+        yi = np.linspace(y.min(), y.max(), num)
+        X, Y = np.meshgrid(xi, yi)
+
+        U = griddata((x, y), u, (X, Y), method='linear')
+        V = griddata((x, y), v, (X, Y), method='linear')
+        plt.quiver(X, Y, U, V)
+
+    plt.gca().set_aspect('equal', adjustable='box')
+    plt.title(title, fontsize=12)
+    plt.xlabel(xlbl, fontsize=12)
+    plt.ylabel(ylbl, fontsize=12)
+    plt.xticks([])
+    plt.yticks([])
 
 def plot_surface(x, y, f, title, figsize=None):
     fig = plt.figure(figsize=figsize)
