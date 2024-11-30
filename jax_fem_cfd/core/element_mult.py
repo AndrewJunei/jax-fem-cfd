@@ -1,6 +1,5 @@
 import jax
 import jax.numpy as jnp
-from ..core.element_calc import jit_segment_sum
 
 """ Currently we assume that the element matrices Le and Ge are the same for each element and that
     the viscosity is a constant over each node. 
@@ -8,6 +7,33 @@ from ..core.element_calc import jit_segment_sum
     and the functions here can be modified such that the vmap treats these matrices like the 
     convection in visc_conv_mult
 """
+
+def consistent_mass_mult(S, Me, nconn, nn, ndim):
+    """ Computes M @ S without mass lumping
+    """
+    def compute_MSe(s):
+        return Me @ s
+
+    v_compute_MSe = jax.vmap(compute_MSe)
+    indices = nconn.flatten()
+
+    x_data = v_compute_MSe(S[nconn])
+    x_result = jax.ops.segment_sum(x_data.flatten(), indices, nn)
+
+    if ndim == 3:
+        z_data = v_compute_MSe(S[nconn + 2*nn])
+        z_result = jax.ops.segment_sum(z_data.flatten(), indices, nn)
+        result = jnp.concatenate((x_result, y_result, z_result))
+
+    elif ndim == 2:
+        y_data = v_compute_MSe(S[nconn + nn])
+        y_result = jax.ops.segment_sum(y_data.flatten(), indices, nn)
+        result = jnp.concatenate((x_result, y_result))
+
+    elif ndim == 1:
+        result = x_result
+
+    return result
 
 def laplacian_element_mult(P, Le, nconn, nn):
     """ Computes the result of L @ P
@@ -18,7 +44,7 @@ def laplacian_element_mult(P, Le, nconn, nn):
     v_compute_LPe = jax.vmap(compute_LPe)
     LP_data = v_compute_LPe(P[nconn])
 
-    LP = jit_segment_sum(LP_data.flatten(), nconn.flatten(), nn)
+    LP = jax.ops.segment_sum(LP_data.flatten(), nconn.flatten(), nn)
 
     return LP
 
@@ -37,12 +63,12 @@ def gradient_element_mult(P, Ge, nconn, nn, ndim):
     G1P_data = v_compute_GPe(Ge[0], P_elem)
     G2P_data = v_compute_GPe(Ge[1], P_elem)
 
-    G1P = jit_segment_sum(G1P_data.flatten(), indices, nn)
-    G2P = jit_segment_sum(G2P_data.flatten(), indices, nn)
+    G1P = jax.ops.segment_sum(G1P_data.flatten(), indices, nn)
+    G2P = jax.ops.segment_sum(G2P_data.flatten(), indices, nn)
 
     if ndim == 3:
         G3P_data = v_compute_GPe(Ge[2], P_elem)
-        G3P = jit_segment_sum(G3P_data.flatten(), indices, nn)
+        G3P = jax.ops.segment_sum(G3P_data.flatten(), indices, nn)
         GP = jnp.concatenate((G1P, G2P, G3P))
 
     elif ndim == 2:
@@ -64,12 +90,12 @@ def visc_conv_mult(U, Ce_all, Le, mu, rho, nconn, nn, ndim):
     u_data = v_combined_mult(Ce_all, Ke, U[nconn])
     v_data = v_combined_mult(Ce_all, Ke, U[nconn + nn])
 
-    u_result = jit_segment_sum(u_data.flatten(), indices, nn)
-    v_result = jit_segment_sum(v_data.flatten(), indices, nn)
+    u_result = jax.ops.segment_sum(u_data.flatten(), indices, nn)
+    v_result = jax.ops.segment_sum(v_data.flatten(), indices, nn)
 
     if ndim == 3:
         w_data = v_combined_mult(Ce_all, Ke, U[nconn + 2*nn])
-        w_result = jit_segment_sum(w_data.flatten(), indices, nn)
+        w_result = jax.ops.segment_sum(w_data.flatten(), indices, nn)
         result = jnp.concatenate((u_result, v_result, w_result))
 
     elif ndim == 2:
@@ -91,12 +117,12 @@ def stabilized_visc_conv_mult(U, Ce_all, Se_all, Le, mu, rho, nconn, nn, ndim):
     u_data = v_combined_mult(Ce_all, Ke, Se_all, U[nconn])
     v_data = v_combined_mult(Ce_all, Ke, Se_all, U[nconn + nn])
 
-    u_result = jit_segment_sum(u_data.flatten(), indices, nn)
-    v_result = jit_segment_sum(v_data.flatten(), indices, nn)
+    u_result = jax.ops.segment_sum(u_data.flatten(), indices, nn)
+    v_result = jax.ops.segment_sum(v_data.flatten(), indices, nn)
 
     if ndim == 3:
         w_data = v_combined_mult(Ce_all, Ke, Se_all, U[nconn + 2*nn])
-        w_result = jit_segment_sum(w_data.flatten(), indices, nn)
+        w_result = jax.ops.segment_sum(w_data.flatten(), indices, nn)
         result = jnp.concatenate((u_result, v_result, w_result))
 
     elif ndim == 2:
@@ -117,12 +143,12 @@ def divergence_element_mult(U, Ge, nconn, nn, ndim):
     D1u_data = v_compute_div_mult(Ge[0].T, U[nconn])
     D2v_data = v_compute_div_mult(Ge[1].T, U[nconn + nn])
 
-    D1u = jit_segment_sum(D1u_data.flatten(), indices, nn)
-    D2v = jit_segment_sum(D2v_data.flatten(), indices, nn)
+    D1u = jax.ops.segment_sum(D1u_data.flatten(), indices, nn)
+    D2v = jax.ops.segment_sum(D2v_data.flatten(), indices, nn)
 
     if ndim == 3:
         D3w_data = v_compute_div_mult(Ge[2].T, U[nconn + 2*nn])
-        D3w = jit_segment_sum(D3w_data.flatten(), indices, nn)
+        D3w = jax.ops.segment_sum(D3w_data.flatten(), indices, nn)
         DU = D1u + D2v + D3w
 
     elif ndim == 2:
@@ -141,6 +167,35 @@ def scalar_visc_conv_mult(phi, Ce_all, Le, D, nconn, nn):
     v_combined_mult = jax.vmap(combined_mult, in_axes=(0, None, 0))
     data = v_combined_mult(Ce_all, Ke, phi[nconn])
     
-    result = jit_segment_sum(data.flatten(), nconn.flatten(), nn)
+    result = jax.ops.segment_sum(data.flatten(), nconn.flatten(), nn)
+
+    return result
+
+def scalar_stabilized_visc_conv_mult(phi, Ce_all, Se_all, Le, D, nconn, nn):
+    """ Computes (C + K + S) @ phi where S is the streamline diffusion matrix
+    """
+    Ke = D * Le # D is the diffusion constant
+
+    def combined_mult(Ce, Ke, Se, phie):
+        return (Ce + Ke + Se) @ phie
+    
+    v_combined_mult = jax.vmap(combined_mult, in_axes=(0, None, 0, 0))
+    data = v_combined_mult(Ce_all, Ke, Se_all, phi[nconn])
+    
+    result = jax.ops.segment_sum(data.flatten(), nconn.flatten(), nn)
+
+    return result
+
+
+def scalar_consistent_mass_SUPG_mult(phi, Me_tau_all, Me, nconn, nn):
+    """ Computes (M + M^tau) @ phi where M is not lumped and M^tau comes from SUPG
+    """
+    def combined_mult(Me_tau, phie):
+        return (Me + Me_tau) @ phie
+
+    v_combined_mult = jax.vmap(combined_mult)
+    data = v_combined_mult(Me_tau_all, phi[nconn])
+    
+    result = jax.ops.segment_sum(data.flatten(), nconn.flatten(), nn)
 
     return result

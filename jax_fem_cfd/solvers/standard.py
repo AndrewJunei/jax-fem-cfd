@@ -1,4 +1,4 @@
-""" Incompressible, Newtonian Navier Stokes with no body force
+""" Incompressible, Newtonian Navier Stokes
 """
 import jax
 import jax.numpy as jnp
@@ -11,7 +11,7 @@ from ..core import multigrid as mg
 
 
 def solve_momentum(U_n, P_n, M, Le, Ge, Ce_all, rho, mu, dt, nconn, gamma_d, U_d, nn, ndim, tol, 
-                   crank_nicol, has_dirichlet):
+                   crank_nicol, has_dirichlet, F):
     """ Solves the momentum equation with pressure from the previous timestep using the BiCGSTAB
         iterative solver. 
         The boundary conditions are: U_hat = U_d on Gamma_d,
@@ -29,7 +29,7 @@ def solve_momentum(U_n, P_n, M, Le, Ge, Ce_all, rho, mu, dt, nconn, gamma_d, U_d
             return result
         
         rhs = (((rho/dt) * M * U_n) - emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim) 
-               - emult.visc_conv_mult(U_n, Ce_all, Le, mu, rho, nconn, nn, ndim) / 2)
+               - emult.visc_conv_mult(U_n, Ce_all, Le, mu, rho, nconn, nn, ndim) / 2 + F)
     
     else:
         def lhs_operator(U):
@@ -41,7 +41,7 @@ def solve_momentum(U_n, P_n, M, Le, Ge, Ce_all, rho, mu, dt, nconn, gamma_d, U_d
 
             return result
     
-        rhs = ((rho/dt) * M * U_n) - emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim)
+        rhs = ((rho/dt) * M * U_n) - emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim) + F
     
     if has_dirichlet:
         rhs = rhs.at[gamma_d].set(U_d)
@@ -54,7 +54,7 @@ def solve_momentum(U_n, P_n, M, Le, Ge, Ce_all, rho, mu, dt, nconn, gamma_d, U_d
     return U_hat, U_iters
 
 def solve_momentum_stab(U_n, P_n, M, Le, Ge, Ce_all, Se_all, rho, mu, dt, nconn, gamma_d, U_d, nn, ndim, 
-                        tol, crank_nicol, has_dirichlet):
+                        tol, crank_nicol, has_dirichlet, F):
     """ Same as solve_momentum but with an articial streamline diffusion
     """
     if crank_nicol:
@@ -68,7 +68,7 @@ def solve_momentum_stab(U_n, P_n, M, Le, Ge, Ce_all, Se_all, rho, mu, dt, nconn,
             return result
         
         rhs = (((rho/dt) * M * U_n) - emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim)
-               - emult.stabilized_visc_conv_mult(U_n, Ce_all, Se_all, Le, mu, rho, nconn, nn, ndim) / 2)
+               - emult.stabilized_visc_conv_mult(U_n, Ce_all, Se_all, Le, mu, rho, nconn, nn, ndim) / 2 + F)
 
     else:
         def lhs_operator(U):
@@ -80,7 +80,7 @@ def solve_momentum_stab(U_n, P_n, M, Le, Ge, Ce_all, Se_all, rho, mu, dt, nconn,
             
             return result
         
-        rhs = ((rho/dt) * M * U_n) - emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim)
+        rhs = ((rho/dt) * M * U_n) - emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim) + F
 
     if has_dirichlet:
         rhs = rhs.at[gamma_d].set(U_d)
@@ -136,9 +136,9 @@ def solve_pressure(U_star, P_n, Le, Ge, rho, dt, nconn, gamma_p, F, nn, ndim, pr
 
     return P, P_iters 
 
-def four_step_timestep(U_n, U_n_1, P_n, M, Le, Ge, rho, mu, h, dt, nconn, wq, N, Nderiv, 
-                       gamma_d, U_d, gamma_p, F, nn, ndim, stab, p_precond, pressure_M_op, tol,
-                       crank_nicol, has_dirichlet, set_zeroP):
+def four_step_timestep(U_n, P_n, M, Le, Ge, rho, mu, h, dt, nconn, wq, N, Nderiv, 
+                       gamma_d, U_d, gamma_p, F_p, nn, ndim, stab, p_precond, pressure_M_op, tol,
+                       crank_nicol, has_dirichlet, set_zeroP, F):
     """ Uses the algorithm of Choi et al. 1997.
         Some notable things: to deal with advection oscillations, an artificial streamline diffusion 
         is used, but the full, consistent SUPG terms are not. The convection and streamline 
@@ -148,29 +148,27 @@ def four_step_timestep(U_n, U_n_1, P_n, M, Le, Ge, rho, mu, h, dt, nconn, wq, N,
         iterate the entire process multiple times each timestep until the solution satisfies both
         the momentum equation and is incompressible.
     """
-    # if crank_nicol:
-    #     U_double_star = U_n
-    # else:
-    #     U_double_star = 2*U_n - U_n_1
+    # U_double_star = 2*U_n - U_n_1
     U_double_star = U_n
 
-    Ce_all = ecalc.convection_element_calc(nconn, U_double_star, wq, N, Nderiv, nn, ndim) 
+    # Ce_all = ecalc.convection_element_calc(nconn, U_double_star, wq, N, Nderiv, nn, ndim) 
+    Ce_all = ecalc.conservative_convec_elem_calc(nconn, U_double_star, wq, N, Nderiv, nn, ndim, 0.5)
 
     if stab:
         Se_all = ecalc.streamline_diff_element_calc(nconn, h, mu, rho, U_double_star, wq, N, Nderiv, 
                                                     nn, ndim)
 
         U_hat, U_iters = solve_momentum_stab(U_n, P_n, M, Le, Ge, Ce_all, Se_all, rho, mu, dt, nconn,
-                                             gamma_d, U_d, nn, ndim, tol, crank_nicol, has_dirichlet)
+                                             gamma_d, U_d, nn, ndim, tol, crank_nicol, has_dirichlet, F)
     else:
         U_hat, U_iters = solve_momentum(U_n, P_n, M, Le, Ge, Ce_all, rho, mu, dt, nconn, 
-                                        gamma_d, U_d, nn, ndim, tol, crank_nicol, has_dirichlet)
+                                        gamma_d, U_d, nn, ndim, tol, crank_nicol, has_dirichlet, F)
 
     U_star =  U_hat + ((dt/rho) * emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim) / M)
     # if has_dirichlet:
         # U_star = U_star.at[gamma_d].set(U_d) # questionable
 
-    P, P_iters = solve_pressure(U_star, P_n, Le, Ge, rho, dt, nconn, gamma_p, F, nn, ndim, 
+    P, P_iters = solve_pressure(U_star, P_n, Le, Ge, rho, dt, nconn, gamma_p, F_p, nn, ndim, 
                                 p_precond, pressure_M_op, tol, set_zeroP)
 
     U =  U_star - ((dt/rho) * emult.gradient_element_mult(P, Ge, nconn, nn, ndim) / M)
@@ -179,28 +177,36 @@ def four_step_timestep(U_n, U_n_1, P_n, M, Le, Ge, rho, mu, h, dt, nconn, wq, N,
 
     return U, P, U_iters, P_iters
 
-@partial(jax.jit, static_argnames=("boundary_shapefunc", "nn", "ndim", "has_dirichlet"))
-def compute(node_coords, bconn, nvec, boundary_shapefunc, gamma_d, U_d, nn, ndim, has_dirichlet):
-    """ Compute the boundary integral that depends on U_d.
-        In future, could include source terms, changing material properties, and time dependent
-        boundary conditions.
+@partial(jax.jit, static_argnames=("boundary_shapefunc", "nn", "ndim", "has_dirichlet", "S_func", "has_source"))
+def compute(node_coords, bconn, nvec, boundary_shapefunc, gamma_d, U_d, nn, ndim, has_dirichlet,
+            S_func, Me, nconn, has_source, t_n, t):
+    """ Compute the boundary integral that depends on U_d and the momentum source term
     """
     if has_dirichlet:
         if ndim == 2:
-            F = ecalc.u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, nn, node_coords, 
+            F_p = ecalc.u_dot_n_boundary_integral_1d(bconn, nvec, gamma_d, U_d, nn, node_coords, 
                                                 boundary_shapefunc)
         elif ndim == 3:
-            F = ecalc.u_dot_n_boundary_integral_2d(bconn, nvec, gamma_d, U_d, nn, node_coords,
+            F_p = ecalc.u_dot_n_boundary_integral_2d(bconn, nvec, gamma_d, U_d, nn, node_coords,
                                                 boundary_shapefunc)
+    else:
+        F_p = 0
+
+    if has_source:
+        S_n = S_func(t_n)
+        S = S_func(t)
+        S = (S_n + S) / 2 # assuming crank-nicolson
+
+        F = emult.consistent_mass_mult(S, Me, nconn, nn, ndim)
     else:
         F = 0
 
-    return F
+    return F_p, F
 
 
 def setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, ndim, h, stab, p_precond, 
                  shape_func_ord, num_elem, num_elemf, domain_size, outlet_faces, tol, crank_nicol,
-                 mesh_func, periodic, set_zeroP):
+                 mesh_func, periodic, set_zeroP, partial_dirichlet, has_source):
 
     if ndim == 2:
         if shape_func_ord == 1:
@@ -220,7 +226,7 @@ def setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, ndim, h,
 
     wq, N, Nderiv = shape_func(node_coords[nconn[0]])
 
-    M = ecalc.lumped_mass_matrix(nconn, wq, N, nn, ndim)
+    M, Me = ecalc.lumped_mass_matrix(nconn, wq, N, nn, ndim)
     Le = ecalc.laplacian_element_calc(wq, Nderiv)
     Ge = ecalc.gradient_element_calc(wq, N, Nderiv, ndim)
 
@@ -245,7 +251,7 @@ def setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, ndim, h,
         
     elif p_precond == "multigrid":
         mg_data = mg.multigrid_setup(num_elem, num_elemf, domain_size, outlet_faces,
-                                     mesh_func, shape_func, shape_func_ord)
+                                     mesh_func, shape_func, shape_func_ord, partial_dirichlet)
 
         lvl_nums, Le_lvls, nconn_lvls, L_diag_lvls, gamma_p_lvls = mg_data
         
@@ -261,19 +267,20 @@ def setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, ndim, h,
     else:
         pressure_M_op = None
 
-    def compute_loaded(U_d):
-        return compute(node_coords, bconn, nvec, boundary_shapefunc, gamma_d, U_d, nn, ndim, has_dirichlet)
+    def compute_loaded(U_d, S_func, t_n, t):
+        return compute(node_coords, bconn, nvec, boundary_shapefunc, gamma_d, U_d, nn, ndim, has_dirichlet,
+                       S_func, Me, nconn, has_source, t_n, t)
     
     # important! treat large arrays like nconn as dynamic to lower compile time. if not, 
     # constant folding results in very long compile times
     @partial(jax.jit, static_argnames=("pressure_M_op"))
-    def timestep_jitted(U_n, U_n_1, P_n, dt, rho, mu, U_d, F, nconn, pressure_M_op):
-        return four_step_timestep(U_n, U_n_1, P_n, M, Le, Ge, rho, mu, h, dt, nconn, wq, N, Nderiv, 
-                                  gamma_d, U_d, gamma_p, F, nn, ndim, stab, 
-                                  p_precond, pressure_M_op, tol, crank_nicol, has_dirichlet, set_zeroP)
+    def timestep_jitted(U_n, P_n, dt, rho, mu, U_d, F_p, nconn, pressure_M_op, F):
+        return four_step_timestep(U_n, P_n, M, Le, Ge, rho, mu, h, dt, nconn, wq, N, Nderiv, 
+                                  gamma_d, U_d, gamma_p, F_p, nn, ndim, stab, 
+                                  p_precond, pressure_M_op, tol, crank_nicol, has_dirichlet, set_zeroP, F)
     
-    def timestep_loaded(U_n, U_n_1, P_n, dt, rho, mu, U_d, F):
-        return timestep_jitted(U_n, U_n_1, P_n, dt, rho, mu, U_d, F, nconn, pressure_M_op)
+    def timestep_loaded(U_n, P_n, dt, rho, mu, U_d, F_p, F):
+        return timestep_jitted(U_n, P_n, dt, rho, mu, U_d, F_p, nconn, pressure_M_op, F)
 
     return compute_loaded, timestep_loaded
 

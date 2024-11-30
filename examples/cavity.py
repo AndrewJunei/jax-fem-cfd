@@ -51,13 +51,14 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
     ghia_map = { 5000: (ughia5000, vghia5000), 1000: (ughia1000, vghia1000),
                 400: (ughia400, vghia400), 100: (ughia100, vghia100) }
 
-    # tri = plot_util.get_2d_tri(x, y)
-    # plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', quiv=True)
+    tri = plot_util.get_2d_tri(x, y)
+    plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'x Velocity', quiv=True)
+    plot_util.plot_contour(tri, p, x, y, u, v, nnx, nny, 'Pressure', quiv=False)
     # plot_util.plot_surface(x, y, u, 'x Velocity', figsize=(8,5))
     # plot_util.plot_surface(x, y, p, 'Pressure', figsize=(8,5))
 
-    x2d, y2d, u2d, v2d = plot_util.get_2d_arrays(x, y, u, v, nnx, nny)
-    plot_util.plot_streamlines(x2d, y2d, u2d, v2d, 'Streamlines')
+    # x2d, y2d, u2d, v2d = plot_util.get_2d_arrays(x, y, u, v, nnx, nny)
+    # plot_util.plot_streamlines(x2d, y2d, u2d, v2d, 'Streamlines')
 
     if Re in [5000, 1000, 400, 100]:
         ughia, vghia = ghia_map.get(Re, (None, None))
@@ -71,7 +72,7 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
                                 xghia, vghia, reflbl, x1d, vy[(nny - 1) // 2, :], lbl,
                                 'x Velocity at x=0.5', 'y Velocity at y=0.5', 'y', 'x')
         
-    plot_util.plot_solve_iters(U_iters, P_iters, steps)
+    # plot_util.plot_solve_iters(U_iters, P_iters, steps)
 
     plot_util.show_plots()
 
@@ -79,24 +80,24 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
 if __name__ == "__main__":
     # use_single_gpu(DEVICE_ID=7)
     print_device_info()
-    # jax.config.update("jax_enable_x64", True)
+    jax.config.update("jax_enable_x64", True)
 
     config = sim.Config(mesh="simple",
                         solver="standard",
                         mesh_config=sim.SimpleMeshConfig(
-                            num_elem=[128, 128], # x elements, y elements
+                            num_elem=[64, 64], # x elements, y elements
                             domain_size=[1, 1], # x length, y length
-                            dirichlet_faces=[0, 1, 2, 3], # DRTL, 2 = top
-                            outlet_faces=[], # no outlet
-                            symmetry_faces=[],
+                            shape_func_ord=1,
                             periodic=False), 
                         solver_config=sim.StandardSolverConfig(
-                            ndim=2,
-                            shape_func_ord=1,
+                            dirichlet_faces=[0, 1, 2, 3], # DRTL, 2 = top
+                            symmetry_faces=[], 
+                            outlet_faces=[], # no outlet
                             streamline_diff=False,
                             crank_nicolson=True, # why is it faster if True?
                             solver_tol=1e-6,
                             set_zeroP=True,
+                            has_source=False,
                             pressure_precond='multigrid',
                             final_multigrid_mesh=[4, 4]))
 
@@ -104,9 +105,9 @@ if __name__ == "__main__":
     print('Mesh and solver setup complete')
     print(f'Using a {config.mesh_config.num_elem[0]}x{config.mesh_config.num_elem[1]} mesh')
 
-    rho, mu, u_top = 1, 0.001, 1
-    t_final = 35 # final time of simulation
-    Cmax = 10 # for CFL condition
+    rho, mu, u_top = 1, 0.0025, 1
+    t_final = 25 # final time of simulation
+    Cmax = 5 # for CFL condition
     dt = Cmax * h / u_top
     Re = int(rho * u_top * config.mesh_config.domain_size[0] / mu)
     print('Re =', Re)
@@ -132,7 +133,7 @@ if __name__ == "__main__":
     # gmres_list, cg_list, step_list = load_iter_hist('data/400cavity_iters.npy')
 
     cavity_plots(node_coords, config.mesh_config.num_elem, config.mesh_config.domain_size,
-                 U, p, Re, U_iters, P_iters, steps, config.solver_config.shape_func_ord)
+                 U, p, Re, U_iters, P_iters, steps, config.mesh_config.shape_func_ord)
 
 
 

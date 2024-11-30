@@ -5,7 +5,14 @@ from PyQt5.QtCore import Qt
 import numpy as np
 from matplotlib.tri import Triangulation
 from scipy.interpolate import griddata
-plt.rcParams['font.family'] = 'Arial'
+from matplotlib.animation import FuncAnimation, PillowWriter
+
+for font in ['Arial', 'Liberation Sans', 'sans-serif']:
+    try:
+        plt.rcParams['font.family'] = font
+        break
+    except:
+        continue
 
 def show_plots():
     for i in plt.get_fignums(): # iterate over all active plot numbers
@@ -32,7 +39,7 @@ def get_2d_arrays(x, y, u, v, nnx, nny):
 def get_2d_tri(x, y):
     return Triangulation(x, y)
 
-def plot_contour(tri, f, x, y, u, v, nnx, nny, title, figsize=None, c_shrink=1.0, quiv=False,
+def plot_contour(tri, f, x, y, u, v, nnx, nny, title=None, figsize=None, c_shrink=1.0, quiv=False,
                  xlbl=None, ylbl=None):
     plt.figure(figsize=figsize)
 
@@ -82,7 +89,7 @@ def plot_image(f, x, y, u, v, nnx, nny, title, figsize=None, c_shrink=1.0, quiv=
     plt.xticks([])
     plt.yticks([])
 
-def plot_surface(x, y, f, title, figsize=None):
+def plot_surface(x, y, f, title=None, figsize=None):
     fig = plt.figure(figsize=figsize)
     ax = fig.add_subplot(111, projection='3d')
     surf = ax.plot_trisurf(x, y, f, cmap='jet', edgecolor='none')
@@ -137,3 +144,58 @@ def plot_solve_iters(momentum_iters, pressure_iters, steps):
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.xticks(fontsize=10)
     plt.yticks(fontsize=10)
+
+def save_animation(phi_list, path, dt, nnx, nny, duration_seconds, init_time_seconds, constant_lim):
+    fig, ax = plt.subplots(figsize=(10, 8))
+
+    if constant_lim:
+        im = ax.imshow(np.zeros((nny, nnx)), cmap='jet', vmin=0, vmax=1)
+        # im = ax.imshow(np.zeros((nny, nnx)), cmap='Purples', vmin=0, vmax=1)
+    else:
+        im = ax.imshow(np.zeros((nny, nnx)), cmap='jet')
+        # im = ax.imshow(np.zeros((nny, nnx)), cmap='Purples')
+
+    _ = fig.colorbar(im, ax=ax)
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    title = ax.set_title("", fontsize=12)
+   
+    max_fps = 50  # reasonable upper limit
+
+    # Calculate fps needed for duration
+    ideal_fps = len(phi_list) / duration_seconds
+    fps = min(ideal_fps, max_fps)  # cap at max_fps
+    
+    # Calculate frame step based on final fps
+    step = max(1, round(len(phi_list) / (duration_seconds * fps)))
+    frames_to_use = phi_list[::step]
+
+    # Show initial condition longer
+    initial_frames = round(init_time_seconds * fps)  # number of frames to show initial condition
+    frames_to_use = [frames_to_use[0]] * initial_frames + list(frames_to_use)
+    n_frames = len(frames_to_use)
+   
+    def animate(frame):
+        if frame < initial_frames:
+            f = frames_to_use[0]
+            actual_time = 0
+        else:
+            f = frames_to_use[frame]
+            actual_time = ((frame - initial_frames) * step * dt)
+
+        f = np.flip(f.reshape(nny, nnx), axis=0)
+        im.set_array(f)
+        if not constant_lim:
+            im.set_clim(vmin=np.min(f), vmax=np.max(f))
+        title.set_text(f'Concentration at time {actual_time:.2f}')
+        return [im]
+
+    print(f"Number of frames: {n_frames}")
+    print(f"FPS: {fps}")
+    print(f"Expected duration: {n_frames/fps} seconds")
+
+    anim = FuncAnimation(fig, animate, frames=n_frames, blit=True)
+    writer = PillowWriter(fps=fps)
+    anim.save(f'{path}.gif', writer=writer)
+    plt.close()

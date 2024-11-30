@@ -3,17 +3,17 @@ import jax.numpy as jnp
 from functools import partial
 from ..core import element_calc as ecalc
 from ..core.element_mult import laplacian_element_mult
-from ..utils.jax_iterative_solvers import cg, bicgstab
+from ..utils.jax_iterative_solvers import cg
 
 
-def multigrid_setup(num_elem, num_elemf, domain_size, outlet_faces, mesh_func, shapefunc, ord):
+def multigrid_setup(num_elem, num_elemf, domain_size, outlet_faces, mesh_func, shapefunc, shape_func_ord, partial_dirichlet):
 
     nex, ney = num_elem
     N = int(jnp.log2(nex // num_elemf[0])) + 1
 
-    if ord == 1:
+    if shape_func_ord == 1:
         nen = 4
-    elif ord == 2:
+    elif shape_func_ord == 2:
         nen = 9
     
     lvl_nums = jnp.zeros((N + 1, 5), dtype=int) # [nn, nnx, nny, ne, np]
@@ -23,19 +23,43 @@ def multigrid_setup(num_elem, num_elemf, domain_size, outlet_faces, mesh_func, s
     nconn_lvls, L_diag_lvls, gamma_p_lvls = [], [], []
 
     for i in range(N):
-        node_coords, nconn, surfnodes, _, _ = mesh_func(nex, ney, *domain_size)
+        node_coords, nconn, surfnodes, bconns, _ = mesh_func(nex, ney, *domain_size)
         wq, _, Nderiv = shapefunc(node_coords[nconn[0]])
         nn = node_coords.shape[0]
 
-        if ord == 1:
+        if shape_func_ord == 1:
             nnx, nny = nex + 1, ney + 1
-        elif ord == 2:
+        elif shape_func_ord == 2:
             nnx, nny = 2*nex + 1, 2*ney + 1
 
-        if not outlet_faces: 
-            gamma_p = jnp.array([0]) 
+        outlet_nodes = []
+
+        if outlet_faces:
+            for face in outlet_faces:
+                outlet_nodes.append(surfnodes[face])
+
+        if partial_dirichlet:
+            for face, (start_frac, end_frac, remainder_type) in partial_dirichlet.items():
+                face_nodes = surfnodes[face]
+                face_bconn = bconns[face]
+
+                num_face_elem = face_bconn.shape[0]
+                
+                start_idx = round(start_frac * num_face_elem)
+                end_idx = round(end_frac * num_face_elem)
+
+                if shape_func_ord == 2:
+                    start_idx = 2 * start_idx
+                    end_idx = 2 * end_idx
+
+                if remainder_type == "outlet":
+                    outlet_nodes.append(face_nodes[:start_idx])
+                    outlet_nodes.append(face_nodes[end_idx+1:])
+
+        if outlet_nodes:
+            gamma_p = jnp.unique(jnp.concatenate(outlet_nodes)) 
         else:
-            gamma_p = jnp.unique(jnp.concatenate([surfnodes[i] for i in outlet_faces])) 
+            gamma_p = jnp.array([0])
 
         Le = ecalc.laplacian_element_calc(wq, Nderiv)
         L_diag = ecalc.laplacian_diag(Le, nconn, nn)

@@ -70,12 +70,12 @@ def taylor_green_plots(U, p, node_coords, t_final, rho, mu, num_elem, nn, U_iter
 
     tri = plot_util.get_2d_tri(x, y)
 
-    # plot_util.plot_contour(tri, u_exact, x, y, u_exact, v_exact, nnx, nny, 'u exact', quiv=True)
+    plot_util.plot_contour(tri, u_exact, x, y, u_exact, v_exact, nnx, nny, 'u exact', quiv=True)
     # plot_util.plot_contour(tri, p_exact, x, y, u_exact, v_exact, nnx, nny, 'p exact', quiv=False)
     # plot_util.plot_image(u_exact, x, y, u_exact, v_exact, nnx, nny, 'u exact', quiv=True)
     plot_util.plot_image(p_exact, x, y, u_exact, v_exact, nnx, nny, 'p exact', quiv=False)
 
-    # plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'u', quiv=True)
+    plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'u', quiv=True)
     # plot_util.plot_contour(tri, p, x, y, u, v, nnx, nny, 'p', quiv=False)
     # plot_util.plot_image(u, x, y, u, v, nnx, nny, 'u', quiv=True)
     plot_util.plot_image(p, x, y, u, v, nnx, nny, 'p', quiv=False)
