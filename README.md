@@ -27,7 +27,7 @@ Solving the pressure Poisson equation each timestep is the biggest bottleneck fo
 </p>
 
 ### Matrix-Free Computations
-To perform a matrix vector product, you first need to "generate" your matrix, and then multiply a vector by it. The purple, red, and light blue lines are different options for generating a finite element convection matrix. We use the light blue line, which doesn't assemble a global matrix but instead stores the element matrices. The black, grey, and dark blue lines are different options for performing a matrix vector product. We uses the dark blue line, which performs the multiplication element by element and assembles the global product vector.
+To perform a matrix vector product, you first need to "generate" your matrix, and then multiply a vector by it. The purple, red, and light blue lines are different options for generating a sparse finite element convection matrix. We use the light blue line, which doesn't assemble a global matrix but instead stores the element matrices. The black, grey, and dark blue lines are different options for performing a sparse matrix vector product. We uses the dark blue line, which performs the multiplication element by element and assembles the global product vector.
 
 <p align="center">
     <img src="images/gpu_matvec.png" width="60%">
