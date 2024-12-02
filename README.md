@@ -34,7 +34,7 @@ To perform a matrix vector product, you first need to "generate" your matrix, an
 </p>
 
 ### 4-Step Pressure Projection
-We use a 4-step pressure projection method for efficiency and temporal accuracy while avoiding pressure stability issues (for equal order interpolations). To understand these plots, some background information is needed. Without providing it here, you may refer to Codina, 2000 and Choi et al., 1996. These plots clarify some of the issues with these methods discussed in the literature through numerical experiments.
+We use a 4-step pressure projection method for efficiency and temporal accuracy while avoiding pressure stability issues (for equal order interpolations). To understand these plots, some background information is needed. Without providing it here, you may refer to [Codina, 2001](https://www.sciencedirect.com/science/article/pii/S0021999101967257) and [Choi et al., 1997](https://www.sciencedirect.com/science/article/pii/S0045782596011565). These plots clarify some of the issues with these methods discussed in the literature through numerical experiments.
 
 <p align="center">
     <img src="images/projection_convergence.png" width="98%">
@@ -52,7 +52,7 @@ The Taylor-Green vortex with periodic boundary conditions is used to test spatia
 </p>
 
 ### Lid Driven Cavity Benchmark
-The classic Ghia, 1982 lid driven cavity solution is used as a benchmark. Note that this problem requires careful consideration with the finite element method because of the discontinuities at the lid corners. With finite elements, you must specify the velocity at these points. 
+The classic [Ghia, 1982](https://www.sciencedirect.com/science/article/pii/0021999182900584) lid driven cavity solution is used as a benchmark. Note that this problem requires careful consideration with the finite element method because of the discontinuities at the lid corners. With finite elements, you must specify the velocity at these points. 
 
 <p align="center">
     <img src="images/cavity.png" width="98%">
