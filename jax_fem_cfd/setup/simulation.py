@@ -23,10 +23,8 @@ class StandardSolverConfig:
     symmetry_faces: List[int]
     outlet_faces: List[int]
     streamline_diff: bool
-    crank_nicolson: bool
     solver_tol: float
     set_zeroP: bool
-    has_source: bool
     pressure_precond: Optional[str] = None
     final_multigrid_mesh: Optional[List[int]] = None
 
@@ -34,7 +32,6 @@ class StandardSolverConfig:
 class ADEConfig:
     phi_dirichlet_faces: List[int]
     phi_SUPG: bool
-    has_phi_source: bool
 
 @dataclass
 class PassiveTransportConfig:
@@ -198,22 +195,7 @@ def setup(config: Config):
     if config.solver == "standard":
         from ..solvers.standard import setup_solver
 
-        compute, timestep = setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, 
-                                         len(config.mesh_config.num_elem), h, 
-                                         config.solver_config.streamline_diff,
-                                         config.solver_config.pressure_precond,
-                                         config.mesh_config.shape_func_ord,
-                                         config.mesh_config.num_elem,
-                                         config.solver_config.final_multigrid_mesh,
-                                         config.mesh_config.domain_size,
-                                         config.solver_config.outlet_faces,
-                                         config.solver_config.solver_tol,
-                                         config.solver_config.crank_nicolson,
-                                         mesh_func, 
-                                         config.mesh_config.periodic,
-                                         config.solver_config.set_zeroP,
-                                         config.mesh_config.partial_dirichlet,
-                                         config.solver_config.has_source)
+        compute, timestep = setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, mesh_func, config)
         
         return compute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d
         
@@ -243,92 +225,52 @@ def set_face_velocity(U_d, nodes, gamma_d, values, nn, var):
 
     return U_d.at[node_indices].set(values)
 
-def timestep_loop(t_final, dt, print_iter, save_iter, compute_func, timestep_func, 
-                  rho, mu, U_d, U, P, S_func=None):
-    
-    U_iter_list, P_iter_list, step_list = [], [], []
 
+def timestep_loop(t_final, dt, save_interval, print_interval, compute_func, timestep_func,
+                  parameters, dirichlet_vals, initial_states, S_func=None, phi_S_func=None, save2file=None, h5name=None):
+    """ Full timestepping loop with printing and optional saving.
+        parameters = (rho, mu) or (rho, mu, D)
+        dirichlet_vals = (U_d) or (U_d, phi_d)
+        initial_states = (U0. P0) or (U0, P0, phi0)
+        Optional source functions S_func for momentum and phi_S_func for ADE
+    """
+    has_phi = True if len(initial_states) == 3 else False
+    U, P = initial_states[:2]
+    phi = initial_states[2] if has_phi else None
+    U_d = dirichlet_vals[0]
+    phi_d = dirichlet_vals[1] if has_phi else None
+
+    U_iter_list, P_iter_list, step_list, U_list = [], [], [], []
+    if has_phi:
+        phi_iter_list, phi_list = [], []
+
+    # compilation
     F_p, F = compute_func(U_d, S_func, 0, 0)
-
     compile_start = time.perf_counter()
-    _, _, _, _ = timestep_func(U, P, dt, rho, mu, U_d, F_p, F)
+    if has_phi:
+        # still has issue of compiling again at step 2...
+        _ = timestep_func(U, P, phi, dt, *parameters, U_d, phi_d, F_p, F, phi_S_func)
+    else:
+        _ = timestep_func(U, P, dt, *parameters, U_d, F_p, F)
     compile_time = time.perf_counter() - compile_start
-    print(f'Run to compile took {(compile_time):.2f} s\n')
+    print(f'Run to compile took {compile_time:.2f} s\n')
 
     num_steps = int(t_final / dt)
     if num_steps * dt < t_final:
         num_steps += 1
-
-    total_start = time.perf_counter()
-    for step in range(num_steps):
-        U_n, P_n = jnp.array(U), jnp.array(P)
-
-        t_n = step * dt
-        t = (step + 1) * dt
-
-        start = time.perf_counter()
-        F_p, F = compute_func(U_d, S_func, t_n, t) # should be optional
-        U, P, U_iters, P_iters = timestep_func(U_n, P_n, dt, rho, mu, U_d, F_p, F)
-        end = time.perf_counter()
-
-        if step < 5 or (step + 1) % save_iter == 0 or step == num_steps - 1:
-            U_iter_list.append(U_iters)
-            P_iter_list.append(P_iters)
-            step_list.append(step + 1)
-
-        if step < 5 or (step + 1) % print_iter == 0 or step == num_steps - 1:
-            diff = (jnp.linalg.norm(jnp.concatenate((U, P)) - jnp.concatenate((U_n, P_n)), 2) / 
-                    jnp.linalg.norm(jnp.concatenate((U, P)), 2))
-            # diff = jnp.max(jnp.abs(U - U_n))
-            print(f'End step {step + 1}, time {t:.3f}, took {((end - start)*1000):.2f} ms, diff = {diff:.6f}')
-
-    total_time = time.perf_counter() - total_start
-    print(f'\nTotal timestepping time: {total_time:.2f} s')
-    print(f'Avg of {((total_time / num_steps)*1000):.2f} ms per timestep')
-    print(f'Avg of {(((total_time + compile_time) / num_steps)*1000):.2f} ms per timestep including compile time\n')
-
-    U_iter_list = jnp.array(U_iter_list)
-    P_iter_list = jnp.array(P_iter_list)
-    step_list = jnp.array(step_list)
-
-    return U, P, U_iter_list, P_iter_list, step_list
-
-""" Reorganize Later. """
-def timestep_loop_transport(t_final, dt, save_interval, print_interval, compute_func, timestep_func, 
-                  rho, mu, D, U_d, phi_d, U, P, phi, S_func=None, phi_S_func=None, save2file=False, h5name=None):
-    
-    U_iter_list, P_iter_list, phi_iter_list, step_list = [], [], [], []
-
-    F_p, F = compute_func(U_d, S_func, 0, 0)
-
-    compile_start = time.perf_counter()
-    # always recompiles second step no matter what we do...
-    _ = timestep_func(U, P, phi, rho, mu, D, dt, U_d, F_p, F, phi_d, phi_S_func)
-    compile_time = time.perf_counter() - compile_start
-    print(f'Run to compile took {(compile_time):.2f} s\n')
-
-    num_steps = int(t_final / dt)
-    if num_steps * dt < t_final:
-        num_steps += 1
-
     print('num steps:', num_steps)
 
     if save2file:
-        U_list, phi_list = [], []
-
         with h5py.File(f'{h5name}.h5', 'w') as f:
-            # Calculate optimal chunk size (typically similar to buffer size)
-            chunk_size = min(save_interval, 100)  # Don't make chunks too large
-            
-            # Create datasets with optimized settings
+            chunk_size = 100
+
             f.create_dataset('U',
                            shape=(0, U.shape[0]),
                            maxshape=(None, U.shape[0]),
                            chunks=(chunk_size, U.shape[0]),
                            compression='gzip',
-                           compression_opts=4,  # Balance between speed and compression
-                           fletcher32=True)     # Checksum for data integrity
-            
+                           compression_opts=4,  
+                           fletcher32=True)     
             f.create_dataset('phi',
                            shape=(0, phi.shape[0]),
                            maxshape=(None, phi.shape[0]),
@@ -336,13 +278,11 @@ def timestep_loop_transport(t_final, dt, save_interval, print_interval, compute_
                            compression='gzip',
                            compression_opts=4,
                            fletcher32=True)
-            
-            # Save initial condition
             f['U'].resize(1, axis=0)
             f['phi'].resize(1, axis=0)
             f['U'][0] = jax.device_get(U) # initial condition
             f['phi'][0] = jax.device_get(phi) # initial condition
-    
+
     else:
         U_list, phi_list = [jax.device_get(U)], [jax.device_get(phi)]
 
@@ -360,54 +300,64 @@ def timestep_loop_transport(t_final, dt, save_interval, print_interval, compute_
             
             # Convert and save in one operation
             f['U'][current_size:current_size + batch_size] = np.stack(U_list)
-            f['phi'][current_size:current_size + batch_size] = np.stack(phi_list)
+            f['phi'][current_size:current_size + batch_size] = np.stack(U_list)
         
         U_list.clear()
         phi_list.clear()
 
     total_start = time.perf_counter()
     for step in range(1, num_steps + 1):
-        U_n, P_n, phi_n = jnp.copy(U), jnp.copy(P), jnp.copy(phi)
+        U_n, P_n = jnp.copy(U), jnp.copy(P)
+        phi_n = jnp.copy(phi) if has_phi else None
 
         t_n = (step - 1)*dt
         t = step * dt
 
         start = time.perf_counter()
-        F_p, F = compute_func(U_d, S_func, t_n, t) # should be optional
-        U, P, phi, U_iters, P_iters, phi_iters = timestep_func(U_n, P_n, phi_n, rho, mu, D, dt, U_d,
-                                                               F_p, F, phi_d, phi_S_func)
+        F_p, F = compute_func(U_d, S_func, t_n, t)
+        if has_phi:
+            U, P, phi, U_iters, P_iters, phi_iters = timestep_func(U_n, P_n, phi_n, dt, *parameters, U_d, phi_d, F_p, F, phi_S_func)
+        else:
+            U, P, U_iters, P_iters = timestep_func(U_n, P_n, dt, *parameters, U_d, F_p, F)
         end = time.perf_counter()
 
         if step % save_interval == 0 or step == num_steps:
             U_list.append(jax.device_get(U))
-            phi_list.append(jax.device_get(phi))
             U_iter_list.append(U_iters)
             P_iter_list.append(P_iters)
-            phi_iter_list.append(phi_iters)
             step_list.append(step)
+
+            if has_phi:
+                phi_list.append(jax.device_get(phi))
+                phi_iter_list.append(phi_iters)
+        
+        if save2file and (step % chunk_size == 0 or step == num_steps):
             save_buffer()
 
         if step <= 5 or step % print_interval == 0 or step == num_steps:
             diff = jnp.linalg.norm(U - U_n, 2) / jnp.linalg.norm(U, 2)
-            print(f'End step {step}, time {t:.2f}, took {((end - start)*1000):.2f} ms, {U_iters} U iters, {P_iters} P iters, {phi_iters} phi iters, diff = {diff:.6f}')
-    
+            if has_phi:
+                print(f'End step {step}, time {t:.2f}, took {((end - start)*1000):.2f} ms, {U_iters} U iters, {P_iters} P iters, {phi_iters} phi iters, diff = {diff:.6f}')
+            else:
+                print(f'End step {step}, time {t:.2f}, took {((end - start)*1000):.2f} ms, {U_iters} U iters, {P_iters} P iters, diff = {diff:.6f}')
+
     total_time = time.perf_counter() - total_start
     print(f'\nTotal timestepping time: {total_time:.2f} s')
-    print(f'Average of {((total_time / step)*1000):.2f} ms per timestep\n')
+    print(f'Avg of {((total_time / num_steps)*1000):.2f} ms per timestep')
+    print(f'Avg of {(((total_time + compile_time) / num_steps)*1000):.2f} ms per timestep including compile time\n')
 
-    U_iter_list = jnp.array(U_iter_list)
-    P_iter_list = jnp.array(P_iter_list)
-    phi_iter_list = jnp.array(phi_iter_list)
-    step_list = jnp.array(step_list)
+    U_iter_list = np.array(U_iter_list)
+    P_iter_list = np.array(P_iter_list)
+    step_list = np.array(step_list)
+    U_list = np.stack(U_list, axis=0) if not save2file else []
 
-    if save2file:
-        U_list.clear()
-        phi_list.clear()
+    if has_phi:
+        phi_iter_list = np.array(phi_iter_list)
+        phi_list = np.stack(phi_list, axis=0) if not save2file else []
+        return U, P, phi, U_iter_list, P_iter_list, phi_iter_list, step_list, U_list, phi_list
+    
     else:
-        U_list = np.stack(U_list)
-        phi_list = np.stack(phi_list)
-
-    return U, P, phi, U_iter_list, P_iter_list, phi_iter_list, step_list, U_list, phi_list
+        return U, P, U_iter_list, P_iter_list, step_list, U_list
 
 def timestep_loop_scan(dt, num_steps, compute_func, timestep_func, rho, mu, D, U_d, phi_d, U0, P0, phi0, S_func):
     F_p, F = compute_func(U_d, S_func, 0, 0)

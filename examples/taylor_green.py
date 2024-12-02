@@ -70,10 +70,10 @@ def taylor_green_plots(U, p, node_coords, t_final, rho, mu, num_elem, nn, U_iter
 
     tri = plot_util.get_2d_tri(x, y)
 
-    plot_util.plot_contour(tri, u_exact, x, y, u_exact, v_exact, nnx, nny, 'u exact', quiv=True)
+    # plot_util.plot_contour(tri, u_exact, x, y, u_exact, v_exact, nnx, nny, 'u exact', quiv=True)
     # plot_util.plot_contour(tri, p_exact, x, y, u_exact, v_exact, nnx, nny, 'p exact', quiv=False)
     # plot_util.plot_image(u_exact, x, y, u_exact, v_exact, nnx, nny, 'u exact', quiv=True)
-    plot_util.plot_image(p_exact, x, y, u_exact, v_exact, nnx, nny, 'p exact', quiv=False)
+    # plot_util.plot_image(p_exact, x, y, u_exact, v_exact, nnx, nny, 'p exact', quiv=False)
 
     plot_util.plot_contour(tri, u, x, y, u, v, nnx, nny, 'u', quiv=True)
     # plot_util.plot_contour(tri, p, x, y, u, v, nnx, nny, 'p', quiv=False)
@@ -93,7 +93,6 @@ def taylor_green_plots(U, p, node_coords, t_final, rho, mu, num_elem, nn, U_iter
     plot_util.show_plots()
 
 
-
 if __name__ == "__main__":
     # use_single_gpu(DEVICE_ID=7)
     print_device_info()
@@ -104,31 +103,28 @@ if __name__ == "__main__":
                         mesh_config=sim.SimpleMeshConfig(
                             num_elem=[64, 64], # x elements, y elements
                             domain_size=[2*jnp.pi, 2*jnp.pi], # x length, y length
+                            shape_func_ord=1,
+                            periodic=True), # all faces periodic, overwrites other conditions
+                        solver_config=sim.StandardSolverConfig(
                             dirichlet_faces=[], 
                             symmetry_faces=[],
                             outlet_faces=[],
-                            periodic=True), # all faces periodic, overwrites other conditions
-                        solver_config=sim.StandardSolverConfig(
-                            ndim=2,
-                            shape_func_ord=1,
                             streamline_diff=False,
-                            crank_nicolson=True,
                             solver_tol=1e-6,
                             set_zeroP=False,
                             pressure_precond=None,
                             final_multigrid_mesh=[2, 2]))
 
-    precompute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d = sim.setup(config)
+    compute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d = sim.setup(config)
     print('Mesh and solver setup complete')
     print(f'Using a {config.mesh_config.num_elem[0]}x{config.mesh_config.num_elem[1]} mesh')
 
     # pressure decays to max 0.067 by t=5
-    t_final = 1.6 # final time of simulation
-    Cmax = 1 # for CFL condition
+    t_final = 1.0 # final time of simulation
+    Cmax = 0.1 # for CFL condition
     rho, mu = 1, 0.1
-    # dt = Cmax * h # velocity scale is 1
-
-    dt = 0.01
+    dt = Cmax * h # velocity scale is 1
+    # dt = 0.01
 
     Re = int(rho * config.mesh_config.domain_size[0] / mu) # velocity scale is 1
     print('Re =', Re)
@@ -142,10 +138,10 @@ if __name__ == "__main__":
     else:
         P0 = P0 - jnp.mean(P0) # ensure that the initial guess has zero mean (it does)
 
-    U, p, U_iters, P_iters, steps = sim.timestep_loop(t_final, dt, 20, 20, precompute, timestep, 
-                                                      rho, mu, U_d, U0, P0)
+    U, p, U_iters, P_iters, steps, U_list = sim.timestep_loop(t_final, dt, 100, 100, compute, timestep,
+                                                              [rho, mu], [U_d], [U0, P0])
     
     taylor_green_plots(U, p, node_coords, t_final, rho, mu, config.mesh_config.num_elem, nn, 
-                       U_iters, P_iters, steps, config.solver_config.shape_func_ord, config.solver_config.set_zeroP)
+                       U_iters, P_iters, steps, config.mesh_config.shape_func_ord, config.solver_config.set_zeroP)
     
 

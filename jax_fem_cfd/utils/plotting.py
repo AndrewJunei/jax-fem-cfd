@@ -6,13 +6,14 @@ import numpy as np
 from matplotlib.tri import Triangulation
 from scipy.interpolate import griddata
 from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.font_manager import fontManager
+
+available_fonts = set(f.name for f in fontManager.ttflist)
 
 for font in ['Arial', 'Liberation Sans', 'sans-serif']:
-    try:
+    if font in available_fonts:
         plt.rcParams['font.family'] = font
         break
-    except:
-        continue
 
 def show_plots():
     for i in plt.get_fignums(): # iterate over all active plot numbers

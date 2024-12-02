@@ -12,13 +12,13 @@ from ..setup.simulation import Config
 
 
 def update_phi_SUPG(phi_n, nconn, Mtau_all_n, Ctau_all_n, Me, Ce_all, Ce_all_n, Le, D, dt, nn, 
-                    gamma_d_phi, phi_d, has_phi_dirichlet, tol):
+                    gamma_d_phi, phi_d, tol):
     
     def lhs_operator(phi):
         result = ((1/dt) * emult.scalar_consistent_mass_SUPG_mult(phi, Mtau_all_n, Me, nconn, nn)
                 + 0.5*emult.scalar_stabilized_visc_conv_mult(phi, Ce_all, Ctau_all_n, Le, D, nconn, nn))
         
-        if has_phi_dirichlet:
+        if gamma_d_phi is not None:
             mask = jnp.zeros_like(phi, dtype=bool).at[gamma_d_phi].set(True)
             result = jnp.where(mask, phi, result)
         return result
@@ -26,7 +26,7 @@ def update_phi_SUPG(phi_n, nconn, Mtau_all_n, Ctau_all_n, Me, Ce_all, Ce_all_n, 
     rhs = ((1/dt) * emult.scalar_consistent_mass_SUPG_mult(phi_n, Mtau_all_n, Me, nconn, nn)
         - 0.5*emult.scalar_stabilized_visc_conv_mult(phi_n, Ce_all_n, Ctau_all_n, Le, D, nconn, nn))
 
-    if has_phi_dirichlet:
+    if gamma_d_phi is not None:
         rhs = rhs.at[gamma_d_phi].set(phi_d)
         x0 = phi_n.at[gamma_d_phi].set(phi_d) 
     else:
@@ -36,13 +36,13 @@ def update_phi_SUPG(phi_n, nconn, Mtau_all_n, Ctau_all_n, Me, Ce_all, Ce_all_n, 
 
     return phi, phi_iters
 
-def update_phi(phi_n, nconn, Me, Ce_all, Ce_all_n, Le, D, dt, nn, gamma_d_phi, phi_d, has_phi_dirichlet, tol):
+def update_phi(phi_n, nconn, Me, Ce_all, Ce_all_n, Le, D, dt, nn, gamma_d_phi, phi_d, tol):
     
     def lhs_operator(phi):
         result = ((1/dt) * emult.consistent_mass_mult(phi, Me, nconn, nn, 1)
                 + 0.5*emult.scalar_visc_conv_mult(phi, Ce_all, Le, D, nconn, nn))
         
-        if has_phi_dirichlet:
+        if gamma_d_phi is not None:
             mask = jnp.zeros_like(phi, dtype=bool).at[gamma_d_phi].set(True)
             result = jnp.where(mask, phi, result)
         return result
@@ -50,7 +50,7 @@ def update_phi(phi_n, nconn, Me, Ce_all, Ce_all_n, Le, D, dt, nn, gamma_d_phi, p
     rhs = ((1/dt) * emult.consistent_mass_mult(phi_n, Me, nconn, nn, 1)
         - 0.5*emult.scalar_visc_conv_mult(phi_n, Ce_all_n, Le, D, nconn, nn))
 
-    if has_phi_dirichlet:
+    if gamma_d_phi is not None:
         rhs = rhs.at[gamma_d_phi].set(phi_d)
         x0 = phi_n.at[gamma_d_phi].set(phi_d) 
     else:
@@ -62,25 +62,22 @@ def update_phi(phi_n, nconn, Me, Ce_all, Ce_all_n, Le, D, dt, nn, gamma_d_phi, p
 
 
 def timestep(U_n, P_n, M, Le, Ge, rho, mu, dt, nconn, wq, N, Nderiv, 
-             gamma_d, U_d, gamma_p, F_p, nn, ndim, stab, p_precond, pressure_M_op, tol,
-             crank_nicol, has_dirichlet, set_zeroP, F, phi_n, gamma_d_phi, phi_d, has_phi_dirichlet,
-             D, Me, phi_S_func, has_phi_source, phi_SUPG):
+             gamma_d, U_d, gamma_p, F_p, nn, ndim, stab, p_precond, p_M_op, tol,
+             set_zeroP, F, phi_n, gamma_d_phi, phi_d, D, Me, phi_S_func, phi_SUPG):
 
-    # minor inefficieny, can be re used from last timestep unless beta=0.5 is used
-    Ce_all_n = ecalc.conservative_convec_elem_calc(nconn, U_n, wq, N, Nderiv, nn, ndim, 1) # maybe do 0.5 for stability
+    Ce_all_n = ecalc.conservative_convec_elem_calc(nconn, U_n, wq, N, Nderiv, nn, ndim, 0.5) 
 
-    U_hat, U_iters = standard.solve_momentum(U_n, P_n, M, Le, Ge, Ce_all_n, rho, mu, dt, nconn, 
-                                        gamma_d, U_d, nn, ndim, tol, crank_nicol, has_dirichlet, F)
+    U_hat, U_iters = standard.solve_momentum(U_n, P_n, Me, Le, Ge, Ce_all_n, rho, mu, dt, nconn, nn, ndim, gamma_d, U_d, F, tol, 1/2, 1)
 
     U_star =  U_hat + ((dt/rho) * emult.gradient_element_mult(P_n, Ge, nconn, nn, ndim) / M)
 
-    P, P_iters = standard.solve_pressure(U_star, P_n, Le, Ge, rho, dt, nconn, gamma_p, F_p, nn, ndim, 
-                                p_precond, pressure_M_op, tol, set_zeroP)
+    P, P_iters = standard.solve_pressure(U_star, P_n, Le, Ge, rho, dt, nconn, nn, ndim, gamma_p, F_p, set_zeroP, p_precond, p_M_op, tol, gamma=0)
 
     U =  U_star - ((dt/rho) * emult.gradient_element_mult(P, Ge, nconn, nn, ndim) / M)
-    if has_dirichlet:
+    if gamma_d is not None:
         U = U.at[gamma_d].set(U_d) 
 
+    Ce_all_n = ecalc.conservative_convec_elem_calc(nconn, U_n, wq, N, Nderiv, nn, ndim, 1) 
     Ce_all = ecalc.conservative_convec_elem_calc(nconn, U, wq, N, Nderiv, nn, ndim, 1)
 
     if phi_SUPG:
@@ -91,11 +88,11 @@ def timestep(U_n, P_n, M, Le, Ge, rho, mu, dt, nconn, wq, N, Nderiv,
         Mtau_all_n = tau_all_n[:, jnp.newaxis, jnp.newaxis] * Ce_all_n.transpose(0, 2, 1)
 
         phi, phi_iters = update_phi_SUPG(phi_n, nconn, Mtau_all_n, Ctau_all_n, Me, Ce_all, Ce_all_n, Le, D, dt, nn, 
-                                        gamma_d_phi, phi_d, has_phi_dirichlet, tol)
+                                        gamma_d_phi, phi_d, tol)
         
     else:
         phi, phi_iters = update_phi(phi_n, nconn, Me, Ce_all, Ce_all_n, Le, D, dt, nn, gamma_d_phi, 
-                                    phi_d, has_phi_dirichlet, tol)
+                                    phi_d, tol)
     
     return U, P, phi, U_iters, P_iters, phi_iters
 
@@ -168,18 +165,16 @@ def setup_solver(node_coords, nconn, bconn, nvec, gamma_d, gamma_p, nn, gamma_d_
         pressure_M_op = None
 
     def compute_loaded(U_d, S_func, t_n, t):
-        return standard.compute(node_coords, bconn, nvec, boundary_shapefunc, gamma_d, U_d, nn, ndim, has_dirichlet,
-                       S_func, Me, nconn, NS_config.has_source, t_n, t)
+        return standard.compute(node_coords, bconn, nvec, boundary_shapefunc, gamma_d, U_d, nn, ndim, S_func, Me, nconn, t_n, t)
     
     # no constant folding of nconn (faster compile, slower execution)
-    @partial(jax.jit, static_argnames=("pressure_M_op"))
-    def timestep_jitted(U_n, P_n, phi_n, rho, mu, D, dt, U_d, F_p, F, phi_d, nconn, pressure_M_op, phi_S_func):
+    @partial(jax.jit, static_argnames=("p_M_op"))
+    def timestep_jitted(U_n, P_n, phi_n, rho, mu, D, dt, U_d, F_p, F, phi_d, nconn, p_M_op, phi_S_func):
         return timestep(U_n, P_n, M, Le, Ge, rho, mu, dt, nconn, wq, N, Nderiv, 
-                        gamma_d, U_d, gamma_p, F_p, nn, ndim, NS_config.streamline_diff, NS_config.pressure_precond, pressure_M_op, NS_config.solver_tol,
-                        NS_config.crank_nicolson, has_dirichlet, NS_config.set_zeroP, F, phi_n, gamma_d_phi, phi_d, has_phi_dirichlet,
-                        D, Me, phi_S_func, ADE_config.has_phi_source, ADE_config.phi_SUPG)
+                        gamma_d, U_d, gamma_p, F_p, nn, ndim, NS_config.streamline_diff, NS_config.pressure_precond, p_M_op, NS_config.solver_tol,
+                        NS_config.set_zeroP, F, phi_n, gamma_d_phi, phi_d, D, Me, phi_S_func, ADE_config.phi_SUPG)
     
-    def timestep_loaded(U_n, P_n, phi_n, rho, mu, D, dt, U_d, F_p, F, phi_d, phi_S_func):
+    def timestep_loaded(U_n, P_n, phi_n, dt, rho, mu, D, U_d, phi_d, F_p, F, phi_S_func):
         return timestep_jitted(U_n, P_n, phi_n, rho, mu, D, dt, U_d, F_p, F, phi_d, nconn, pressure_M_op, phi_S_func)
 
     return compute_loaded, timestep_loaded

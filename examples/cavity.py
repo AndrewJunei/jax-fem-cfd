@@ -1,16 +1,17 @@
 import jax.numpy as jnp
 import jax_fem_cfd.setup.simulation as sim
 from jax_fem_cfd.utils.running import *
+import jax_fem_cfd as cfd
 
 
-def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters, steps, ord):
+def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters, steps, shape_func_ord):
     import jax_fem_cfd.utils.plotting as plot_util
     import matplotlib.pyplot as plt
 
     nn = node_coords.shape[0]
-    if ord == 1:
+    if shape_func_ord == 1:
         nnx, nny = num_elem[0] + 1, num_elem[1] + 1
-    elif ord == 2:
+    elif shape_func_ord == 2:
         nnx, nny = 2*num_elem[0] + 1, 2*num_elem[1] + 1
 
     x = node_coords[:, 0]
@@ -72,7 +73,7 @@ def cavity_plots(node_coords, num_elem, domain_size, U, p, Re, U_iters, P_iters,
                                 xghia, vghia, reflbl, x1d, vy[(nny - 1) // 2, :], lbl,
                                 'x Velocity at x=0.5', 'y Velocity at y=0.5', 'y', 'x')
         
-    # plot_util.plot_solve_iters(U_iters, P_iters, steps)
+    plot_util.plot_solve_iters(U_iters, P_iters, steps)
 
     plot_util.show_plots()
 
@@ -94,11 +95,9 @@ if __name__ == "__main__":
                             symmetry_faces=[], 
                             outlet_faces=[], # no outlet
                             streamline_diff=False,
-                            crank_nicolson=True, # why is it faster if True?
                             solver_tol=1e-6,
                             set_zeroP=True,
-                            has_source=False,
-                            pressure_precond='multigrid',
+                            pressure_precond='jacobi',
                             final_multigrid_mesh=[4, 4]))
 
     compute, timestep, node_coords, surfnodes, h, nn, gamma_d, U_d = sim.setup(config)
@@ -113,8 +112,6 @@ if __name__ == "__main__":
     print('Re =', Re)
     print('dt =', dt)
 
-    # look into better way of abstracting the boundary condition setup and dt calculation
-
     # no leaky lid condition!
     top_nodes = surfnodes[2][1:-1] # set lid x velocity
     U_d = sim.set_face_velocity(U_d, top_nodes, gamma_d, u_top, nn, var=1) # rest are 0
@@ -123,8 +120,8 @@ if __name__ == "__main__":
     P0 = jnp.zeros(nn)
     print('Boundary conditions have been set\n')
 
-    U, p, U_iters, P_iters, steps = sim.timestep_loop(t_final, dt, 100, 100, compute, timestep, 
-                                                      rho, mu, U_d, U0, P0) 
+    U, p, U_iters, P_iters, steps, U_list = sim.timestep_loop(t_final, dt, 100, 100, compute, timestep,
+                                                              [rho, mu], [U_d], [U0, P0])
 
     # save_sol(U, p, 'testing/data/noleak_tol8_64bitincludeF_32mesh_Re1000cavity.npy')
     # save_iter_hist(gmres_list, cg_list, step_list, 'data/400cavity_iters.npy')

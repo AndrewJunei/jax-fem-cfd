@@ -2,6 +2,7 @@ import jax.numpy as jnp
 import jax_fem_cfd.setup.simulation as sim
 from jax_fem_cfd.utils.running import *
 
+
 def vortex(node_coords, alpha):
     x = node_coords[:, 0]
     y = node_coords[:, 1]
@@ -11,7 +12,7 @@ def vortex(node_coords, alpha):
 
     return jnp.concatenate((u, v))
 
-def create_square(node_coords, edge_start_x, edge_end_x, edge_start_y, edge_end_y, mag=1.0):
+def create_rect(node_coords, edge_start_x, edge_end_x, edge_start_y, edge_end_y, mag=1.0):
     x = node_coords[:, 0]
     y = node_coords[:, 1]
 
@@ -42,14 +43,15 @@ def create_asymmetric_push(node_coords, u_inlet):
     y = node_coords[:, 1]
     
     # Base flow with y-dependent magnitude
-    u0 = create_square(node_coords, 0.2, 0.8, 0.3, 0.7, u_inlet)
-    amplitude = 0.75 + 0.25 * jnp.sin(7*jnp.pi*y)  # Varies from 0.5 to 1
+    u0 = create_rect(node_coords, 0.1, 0.7, 0.3, 0.7, u_inlet)
+    amplitude = 0.75 + 0.25*jnp.sin(7*jnp.pi*y)  # Varies from 0.5 to 1
     u0 = u0 * amplitude
     
     # Add small vertical component
     v0 = 0.25 * jnp.sin(7*jnp.pi*x) * u0
     
     return jnp.concatenate((u0, v0))
+
 
 if __name__ == "__main__":
     # use_single_gpu(DEVICE_ID=7)
@@ -71,17 +73,14 @@ if __name__ == "__main__":
                 symmetry_faces=[],
                 outlet_faces=[],
                 streamline_diff=False,
-                crank_nicolson=True,
                 solver_tol=1e-6,
                 set_zeroP=True,
-                has_source=False,
                 pressure_precond="multigrid",
                 final_multigrid_mesh=[4, 4]
             ),
             sim.ADEConfig(
                 phi_dirichlet_faces=[],
                 phi_SUPG=True,
-                has_phi_source=False
             )
         )
     )
@@ -90,18 +89,31 @@ if __name__ == "__main__":
     print('Mesh and solver setup complete')
     print(f'Using a {config.mesh_config.num_elem[0]}x{config.mesh_config.num_elem[1]} mesh')
 
-    rho, mu, D = 1, 0.01, 1e-4
-    t_final = 3
+    option = "rotating_x"
 
-    U0 = vortex(node_coords, 5)
-    P0 = jnp.zeros(nn)
-    phi0 = create_x(node_coords, 0.5, 0.1)
-    phi_d = None
+    if option == "rotating_x":
+        rho, mu, D = 1, 0.01, 1e-4
+        t_final = 3
 
-    u0 = U0[:nn]
-    v0 = U0[nn:]
-    u_scale = jnp.mean(jnp.sqrt(u0**2 + v0**2))
-    Cmax = 1 # recommended for SUPG
+        U0 = vortex(node_coords, 5)
+        P0 = jnp.zeros(nn)
+        phi0 = create_x(node_coords, 0.5, 0.1)
+        phi_d = None
+        u0 = U0[:nn]
+        v0 = U0[nn:]
+        u_scale = jnp.mean(jnp.sqrt(u0**2 + v0**2))
+    
+    elif option == "asymm_push":
+        rho, mu, D = 1, 0.0025, 1e-4
+        u_scale = 25
+        t_final = 1
+
+        U0 = create_asymmetric_push(node_coords, u_scale)
+        P0 = jnp.zeros(nn)
+        phi0 = create_rect(node_coords, 0.2, 0.8, 0.3, 0.7)
+        phi_d = None
+
+    Cmax = 1 # recommended for SUPG 
     dt = Cmax * h / u_scale
 
     Re = round(rho * u_scale * config.mesh_config.domain_size[0] / mu)
@@ -112,8 +124,9 @@ if __name__ == "__main__":
     print(f'Element Pe for Navier-Stokes = {NS_elem_Pe:.2f}')
     print(f'Element Pe for ADE = {ADE_elem_Pe:.2f}\n')
 
-    sim_data = sim.timestep_loop_transport(t_final, dt, 1, 50, compute, timestep, rho, mu, D, U_d, phi_d, U0, P0, phi0)
-    U, P, phi, U_iter_list, P_iter_list, phi_iter_list, step_list, U_list, phi_list = sim_data
+    sim_data = sim.timestep_loop(t_final, dt, 1, 100, compute, timestep, 
+                                 [rho, mu, D], [U_d, phi_d], [U0, P0, phi0])
+    U, P, phi, U_iters, P_iters, phi_iters, steps, U_list, phi_list = sim_data
 
     import jax_fem_cfd.utils.plotting as plot_util
-    plot_util.save_animation(phi_list, 'examples/data/test', dt, nnx, nny, 4, 0, False)
+    plot_util.save_animation(phi_list, 'examples/data/test', dt, nnx, nny, 5, 0, True)

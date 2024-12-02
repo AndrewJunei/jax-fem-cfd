@@ -1,5 +1,7 @@
 # Ignore the data folder
 examples/data/
+testing/
+examples/testing/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
