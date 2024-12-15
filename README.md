@@ -10,6 +10,14 @@ Here we use automatic differentiation to learn only the initial velocity field. 
     <img src="images/NU_learned_purple.gif" width="60%">
 </p>
 
+### Stirring of Dye in a Cup
+The stirring is modeled by a time dependent external force that traces a circular path. The force magnitude is slightly greater for the animation on the right.
+
+<p float="left">
+  <img src="images/stirring_50F.gif" width="49%">
+  <img src="images/stirring_70F.gif" width="49%">
+</p>
+
 ### Another Passive Scalar Transport Example
 The boundary conditions are the same as for the NU, but here the initial velocity is a slightly asymmetric "push" to the right and the viscosity is smaller. 
 
